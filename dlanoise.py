@@ -112,7 +112,7 @@ def constrain(
     return value == temp, value
 
 
-def calculate_walk_probabilities(
+def calculate_walk_probabilities_in_cardinal_directions(
     x: int, y: int, x_c: int, y_c: int
 ) -> Tuple[float, float, float, float]:
     # Calculate squared distances
@@ -140,10 +140,9 @@ def calculate_walk_probabilities(
 
 
 def simulate_random_walk(
-    image: Image, concurrent_walkers: int
-) -> List[tuple[int, int]]:
-    # TODO: Implement concurrent random walks
-    # Place a pixel at a random position along an edge of the image
+    image: Image, num_concurrent_walkers: int
+) -> List[Tuple[List[Tuple[int, int]], Tuple[float, float, float, float]]]:
+    # Define edges and directions
     edges = (
         ((0, image.size - 1), (0, 0)),  # Top
         ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
@@ -151,11 +150,6 @@ def simulate_random_walk(
         ((0, 0), (0, image.size - 1)),  # Left
     )
 
-    # Pick a random edge
-    edge = random.choice(edges)
-
-    # Define the directions and the probabilities of walking in a certain
-    # direction dependent on the chosen edge
     directions = (
         (0, -1),  # North
         (0, 1),  # South
@@ -163,38 +157,53 @@ def simulate_random_walk(
         (-1, 0),  # West
     )
 
-    x = random.randint(edge[0][0], edge[0][1])
-    y = random.randint(edge[1][0], edge[1][1])
+    # Create a list of walkers
+    walkers: List[
+        Tuple[List[Tuple[int, int]], Tuple[float, float, float, float]]
+    ] = []
+    for walker in range(num_concurrent_walkers):
+        # Place a pixel at a random position along an edge of the image
+        edge = random.choice(edges)
+        x = random.randint(edge[0][0], edge[0][1])
+        y = random.randint(edge[1][0], edge[1][1])
 
-    # Is it really worth using walk_probabilities?
-    walk_probabilities = calculate_walk_probabilities(
-        x, y, image.size // 2, image.size // 2
-    )
+        # Is it really worth using walk_probabilities?
+        walk_probabilities = (
+            calculate_walk_probabilities_in_cardinal_directions(
+                x, y, image.size // 2, image.size // 2
+            )
+        )
 
-    # Perform random walk
-    path = [(x, y)]
-    while True:
-        # Randomly choose a direction to walk in
-        direction = random.choices(directions, weights=walk_probabilities, k=1)[0]
-        # direction = random.choice(directions)
-        _, x = constrain(x + direction[0], 0, image.size - 1)
-        _, y = constrain(y + direction[1], 0, image.size - 1)
+        path = [(x, y)]
 
-        # Once we find the coordinates of a frozen pixel, we will freeze the
-        # previous pixel along the path of the random walk
-        if image.values[x][y].frozen:
-            prev_x = path[-1][0]
-            prev_y = path[-1][1]
+        walkers.append((path, walk_probabilities))
 
-            pixel = image.values[prev_x][prev_y]
-            pixel.stuck_with = image.values[x][y]
-            pixel.frozen = True
-            pixel.weight = 100
-            break
+    # Perform concurrent random walks
+    while walkers:
+        for i, (path, walk_probabilities) in enumerate(walkers):
+            # Randomly choose a direction to walk in
+            direction = random.choices(
+                directions, weights=walk_probabilities, k=1
+            )[0]
+            # direction = random.choice(directions)
+            _, x = constrain(path[-1][0] + direction[0], 0, image.size - 1)
+            _, y = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
-        path.append((x, y))
+            # Once we find the coordinates of a frozen pixel, we will freeze
+            # the previous pixel along the path of the random walk
+            if image.values[x][y].frozen:
+                prev_x = path[-1][0]
+                prev_y = path[-1][1]
 
-    return path
+                pixel = image.values[prev_x][prev_y]
+                pixel.stuck_with = image.values[x][y]
+                pixel.frozen = True
+                pixel.weight = 100
+                walkers.pop(i)
+
+            path.append((x, y))
+
+    return walkers
 
 
 def calculate_image_density(image: Image) -> float:
@@ -203,15 +212,13 @@ def calculate_image_density(image: Image) -> float:
     return frozen_pixels / total_pixels
 
 
-def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Image:
+def crisp_upscale(
+    image: Image, new_image_size: int, midpoint_jitter: int
+) -> Image:
     scale_factor = new_image_size / image.size
     new_image = Image(new_image_size)
 
     def draw_bresenham_line(x0, y0, x1, y1, weight):
-        """
-        Draw a line between (x0, y0) and (x1, y1) with the given weight and
-        jittered midpoints.
-        """
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
         sx = 1 if x0 < x1 else -1
@@ -231,18 +238,16 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 err += dx
                 y0 += sy
 
-        # Jitter midpoints and draw lines between them
         jittered_points = [points[0]]
         for i in range(1, len(points) - 1):
             x, y = points[i]
             jitter_x = x + random.randint(-midpoint_jitter, midpoint_jitter)
             jitter_y = y + random.randint(-midpoint_jitter, midpoint_jitter)
-            _, jitter_x = constrain(jitter_x, 0, new_image.size - 1)
-            _, jitter_y = constrain(jitter_y, 0, new_image.size - 1)
+            jitter_x = max(0, min(jitter_x, new_image.size - 1))
+            jitter_y = max(0, min(jitter_y, new_image.size - 1))
             jittered_points.append((jitter_x, jitter_y))
         jittered_points.append(points[-1])
 
-        # Draw the lines with jittered points
         for j in range(len(jittered_points) - 1):
             x0, y0 = jittered_points[j]
             x1, y1 = jittered_points[j + 1]
@@ -257,6 +262,7 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 new_image.values[x0][y0].frozen = True
                 if x0 == x1 and y0 == y1:
                     break
+                new_image.values[x0][y0].stuck_with = new_image.values[x1][y1]
                 e2 = 2 * err
                 if e2 > -dy:
                     err -= dy
@@ -275,14 +281,12 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 new_image.values[new_x][new_y].frozen = True
                 new_image.values[new_x][new_y].stuck_with = pixel.stuck_with
 
-                # Draw connections
                 if pixel.stuck_with:
                     old_stuck_x = pixel.stuck_with.x
                     old_stuck_y = pixel.stuck_with.y
                     new_stuck_x = int(old_stuck_x * scale_factor)
                     new_stuck_y = int(old_stuck_y * scale_factor)
 
-                    # Draw a line between the points with jittered midpoints
                     draw_bresenham_line(
                         new_x, new_y, new_stuck_x, new_stuck_y, pixel.weight
                     )
@@ -299,7 +303,8 @@ def perform_dla(
     initial_size: int,
     end_size: int,
     density_threshold: float,
-    concurrent_walkers: int,
+    use_concurrent_walkers: bool,
+    upscale_factor: float,
     upscale_jitter: int,
 ) -> Image:
     image = Image(initial_size)
@@ -307,20 +312,58 @@ def perform_dla(
     # Seed the random generator
     random.seed(seed)
 
+    # Calculate the number of steps and upscale increment needed to reach
+    # end_size
+    steps = 0
+    current_size = initial_size
+    while current_size * upscale_factor < end_size:
+        current_size *= upscale_factor
+        steps += 1
+
+    print(f"Steps: {steps}")
+
     # First we must set the central pixel to have maximum weight
     central_pixel = image.values[image.size // 2][image.size // 2]
     central_pixel.weight = 255
     central_pixel.frozen = True
     image.density = calculate_image_density(image)
 
-    # We need to keep simulating random walks until the image density has
-    # passed the threshold
-    while image.density < density_threshold:
-        simulate_random_walk(image, concurrent_walkers)
-        image.density = calculate_image_density(image)
+    for _ in range(steps):
+        print(f"Creating image of size {image.size}x{image.size}")
+        print(
+            f"Image has density {calculate_image_density(image)} out of {density_threshold}"
+        )
+        # We need to keep simulating random walks until the image density has
+        # passed the threshold
+        while image.density < density_threshold:
+            # Simulate random walk(s)
+            if use_concurrent_walkers:
+                # The number of concurrent walkers equals the number of new
+                # frozen pixels that will be added
+                total_pixels = image.size**2
+                frozen_pixels = image.density * total_pixels
+                num_concurrent_walkers = int(
+                    (density_threshold * total_pixels) - frozen_pixels
+                )
 
-    upscaled = crisp_upscale(image, end_size, upscale_jitter)
-    return image, upscaled
+                print(f"Concurrent walkers: {num_concurrent_walkers}")
+
+                simulate_random_walk(image, num_concurrent_walkers)
+            else:
+                simulate_random_walk(image, 1)
+
+            # Recalculate image density
+            image.density = calculate_image_density(image)
+
+        # Upscale image
+        image = crisp_upscale(
+            image, int(image.size * upscale_factor), upscale_jitter
+        )
+
+        # Modify density_threshold
+        density_threshold /= upscale_factor
+
+    return image
 
 
 def display_image(image: Image) -> None:
@@ -342,9 +385,17 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    image, upscaled = perform_dla(0, 100, 1000, 0.1, 50, 5)
+    image = perform_dla(
+        seed=0,
+        initial_size=50,
+        end_size=1000,
+        density_threshold=0.1,
+        use_concurrent_walkers=False,
+        upscale_factor=1.5,
+        upscale_jitter=1,
+    )
+
     display_image(image)
-    display_image(upscaled)
 
     end_time = time.time()
     print(f"Execution time: {end_time - start_time} seconds")
