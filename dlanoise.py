@@ -105,11 +105,8 @@ class Image:
 
 def constrain(
     value: int | float, low: int | float, high: int | float
-) -> Tuple[bool, int | float]:
-    temp = value
-    value = min(value, high)
-    value = max(value, low)
-    return value == temp, value
+) -> int | float:
+    return max(low, min(high, value))
 
 
 def calculate_walk_probabilities_in_cardinal_directions(
@@ -186,8 +183,8 @@ def simulate_random_walk(
                 directions, weights=walk_probabilities, k=1
             )[0]
             # direction = random.choice(directions)
-            _, x = constrain(path[-1][0] + direction[0], 0, image.size - 1)
-            _, y = constrain(path[-1][1] + direction[1], 0, image.size - 1)
+            x = constrain(path[-1][0] + direction[0], 0, image.size - 1)
+            y = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
             # Once we find the coordinates of a frozen pixel, we will freeze
             # the previous pixel along the path of the random walk
@@ -241,10 +238,16 @@ def crisp_upscale(
         jittered_points = [points[0]]
         for i in range(1, len(points) - 1):
             x, y = points[i]
-            jitter_x = x + random.randint(-midpoint_jitter, midpoint_jitter)
-            jitter_y = y + random.randint(-midpoint_jitter, midpoint_jitter)
-            jitter_x = max(0, min(jitter_x, new_image.size - 1))
-            jitter_y = max(0, min(jitter_y, new_image.size - 1))
+            jitter_x = constrain(
+                x + random.randint(-midpoint_jitter, midpoint_jitter),
+                0,
+                new_image.size - 1,
+            )
+            jitter_y = constrain(
+                y + random.randint(-midpoint_jitter, midpoint_jitter),
+                0,
+                new_image.size - 1,
+            )
             jittered_points.append((jitter_x, jitter_y))
         jittered_points.append(points[-1])
 
@@ -331,8 +334,12 @@ def perform_dla(
     for _ in range(steps):
         print(f"Creating image of size {image.size}x{image.size}")
         print(
-            f"Image has density {calculate_image_density(image)} out of {density_threshold}"
+            f"Image has density {image.density} out of {density_threshold}"
         )
+
+        if image.density > density_threshold:
+            break
+
         # We need to keep simulating random walks until the image density has
         # passed the threshold
         while image.density < density_threshold:
@@ -396,6 +403,15 @@ def main():
     )
 
     display_image(image)
+
+    # for row in range(image.size):
+    #     for col in range(image.size):
+    #         if not (
+    #             image.values[row][col].weight == 100
+    #             or image.values[row][col].weight == 0
+    #             or image.values[row][col].weight == 255
+    #         ):
+    #             print(row, col)
 
     end_time = time.time()
     print(f"Execution time: {end_time - start_time} seconds")
