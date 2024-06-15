@@ -216,7 +216,6 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 err += dx
                 y0 += sy
 
-        line.reverse()
         return line
 
     # Translate pixels from old image onto new image
@@ -239,30 +238,51 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 x1 = int((outbound_connection // image.size) * scale_factor)
                 y1 = int((outbound_connection % image.size) * scale_factor)
 
-                # Perform midpoint jittering
-                mx = (x0 + x1) // 2
-                my = (y0 + y1) // 2
+                if len(draw_bresenham(x0, y0, x1, y1)) > 2:
+                    # Perform midpoint jittering
+                    mx = (x0 + x1) // 2
+                    my = (y0 + y1) // 2
 
-                jitter = random.randint(-midpoint_jitter, midpoint_jitter)
-                _, mx_preserved = constrain(mx + jitter, 0, new_image.size)
-                _, my_preserved = constrain(my + jitter, 0, new_image.size)
+                    # Choose one axis to jitter (to avoid line breakage)
+                    jitter_axis = random.choice(["X", "Y"])
+                    jitter = random.randint(-midpoint_jitter, midpoint_jitter)
 
-                if mx_preserved and my_preserved:
-                    jitter_axis = random.choice(("X", "Y"))
                     if jitter_axis == "X":
-                        mx += jitter
-                    elif jitter_axis == "Y":
-                        my += jitter
+                        _, mx_preserved = constrain(mx + jitter, 0,
+                                                    new_image.size)
+                        if not mx_preserved:  # Jitter out of bounds, try the other axis
+                            _, my_preserved = constrain(my + jitter, 0,
+                                                        new_image.size)
+                            if my_preserved:
+                                my += jitter
+                            else:  # Both out of bounds, no jitter this time
+                                pass
+                        else:
+                            mx += jitter
+                    else:  # jitter_axis == "Y"
+                        _, my_preserved = constrain(my + jitter, 0,
+                                                    new_image.size)
+                        if not my_preserved:
+                            _, mx_preserved = constrain(mx + jitter, 0,
+                                                        new_image.size)
+                            if mx_preserved:
+                                mx += jitter
+                            else:
+                                pass
+                        else:
+                            my += jitter
 
-                bresenham_lines = (draw_bresenham(x0, y0, mx, my), draw_bresenham(mx, my, x1, y1))
+                    bresenham_lines = (draw_bresenham(x0, y0, mx, my), draw_bresenham(mx, my, x1, y1))
+                else:
+                    bresenham_lines = (draw_bresenham(x0, y0, x1, y1),)
 
                 # Draw the bresenham lines
                 for bresenham_line in bresenham_lines:
-                    for prev_line_coord, (lx, ly) in enumerate(bresenham_line[1:]):
+                    for line_coord_i, (lx, ly) in enumerate(bresenham_line[:-1]):
                         line_pixel = new_image.values[lx][ly]
-                        line_pixel.weight = 100 + 20 * prev_line_coord
+                        line_pixel.weight = 100 + 20 * line_coord_i
                         line_pixel.frozen = True
-                        line_pixel.stuck_with = new_image.values[bresenham_line[prev_line_coord][0]][bresenham_line[prev_line_coord][1]]
+                        line_pixel.stuck_with = new_image.values[bresenham_line[line_coord_i + 1][0]][bresenham_line[line_coord_i + 1][1]]
 
     if DEBUG:
         for x in range(new_image_size):
@@ -375,18 +395,29 @@ def main():
 
     images = perform_dla(
         seed=2,
-        initial_size=5,
+        initial_size=50,
         end_size=1000,
         initial_density_threshold=0.1,
         density_falloff_rate=2,
         use_concurrent_walkers=False,
         upscale_factor=2,
-        upscale_jitter=2,
+        upscale_jitter=1,
     )
 
-    for image in images:
-        display_image(image)
-        print(f"Image density: {image.density}")
+    if DEBUG:
+        # Display image history
+        for image in images:
+            display_image(image)
+            print(f"Image density: {image.density}")
+
+        # Ensure that there is only one pixel with no outbound connections
+        final_image = images[-1]
+        inbound, outbound = get_connections(final_image)
+        for i, outbound_connection in enumerate(outbound):
+            if len(outbound_connection) == 0:
+                x = i // final_image.size
+                y = i % final_image.size
+                print(f"({x}, {y})")
 
     end_time = time.time()
     print(f"Execution time: {end_time - start_time} seconds")
@@ -412,23 +443,8 @@ def test():
     random.seed(0)
 
     u1 = crisp_upscale(image, 8 * 3, 1)
-    u2 = crisp_upscale(u1, 8 * 6, 0)
-    u3 = crisp_upscale(u2, 8 * 9, 0)
-
-    # inbound, outbound = get_connections(u2)
-    # for i, connections in enumerate(outbound):
-    #     if None not in connections:
-    #         y = i % u2.size
-    #         x = i // u2.size
-    #         u2.values[x][y].weight = 200
-    #         print(f"({x}, {y})")
-    #
-    # for i, connections in enumerate(inbound):
-    #     if None not in connections:
-    #         y = i % u2.size
-    #         x = i // u2.size
-    #         u2.values[x][y].weight = 200
-    #         print(f"({x}, {y})")
+    u2 = crisp_upscale(u1, 8 * 6, 1)
+    u3 = crisp_upscale(u2, 8 * 9, 1)
 
     display_image(u1)
     display_image(u2)
@@ -436,4 +452,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    main()
