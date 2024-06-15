@@ -117,23 +117,24 @@ def calculate_density(image: Image) -> float:
 
 
 def get_connections(image: Image) -> Tuple[List[List[int | None]], List[List[int | None]]]:
-    inbound: List[List[int | None]] = [[] for _ in range(image.size**2)]
+    inbound = [[] for _ in range(image.size**2)]
+    outbound = [[] for _ in range(image.size**2)]
+
     for x in range(image.size):
         for y in range(image.size):
+            index = x * image.size + y
             pixel = image.values[x][y]
-            if pixel.frozen and pixel.stuck_with:
-                index = pixel.stuck_with.x * image.size + pixel.stuck_with.y
-                inbound[index].append(x * image.size + y)
-            elif not pixel.frozen:
-                inbound[x * image.size + y].append(None)
 
-    outbound: List[List[int | None]] = [[] for _ in range(image.size**2)]
-    for index, inbound_connections in enumerate(inbound):
-        for inbound_connection in inbound_connections:
-            if inbound_connection is not None:
-                outbound[inbound_connection].append(index)
-            else:
-                outbound[index].append(None)  # Why does this work? IDK
+            if pixel.frozen:
+                if pixel.stuck_with:
+                    stuck_index = pixel.stuck_with.x * image.size + pixel.stuck_with.y
+                    inbound[stuck_index].append(index)
+                    outbound[index].append(stuck_index)
+                else:
+                    outbound[index].append(None)  # No inbound connection
+            else:  # Pixel is not frozen
+                inbound[index].append(None)
+                outbound[index].append(None)  # No outbound connection either
 
     return inbound, outbound
 
@@ -248,11 +249,9 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                     jitter = random.randint(-midpoint_jitter, midpoint_jitter)
 
                     if jitter_axis == "X":
-                        _, mx_preserved = constrain(mx + jitter, 0,
-                                                    new_image.size)
+                        _, mx_preserved = constrain(mx + jitter, 0, new_image.size)
                         if not mx_preserved:  # Jitter out of bounds, try the other axis
-                            _, my_preserved = constrain(my + jitter, 0,
-                                                        new_image.size)
+                            _, my_preserved = constrain(my + jitter, 0, new_image.size)
                             if my_preserved:
                                 my += jitter
                             else:  # Both out of bounds, no jitter this time
@@ -260,11 +259,9 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                         else:
                             mx += jitter
                     else:  # jitter_axis == "Y"
-                        _, my_preserved = constrain(my + jitter, 0,
-                                                    new_image.size)
+                        _, my_preserved = constrain(my + jitter, 0, new_image.size)
                         if not my_preserved:
-                            _, mx_preserved = constrain(mx + jitter, 0,
-                                                        new_image.size)
+                            _, mx_preserved = constrain(mx + jitter, 0, new_image.size)
                             if mx_preserved:
                                 mx += jitter
                             else:
