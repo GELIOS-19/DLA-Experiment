@@ -106,8 +106,36 @@ class Image:
                 self.values[x].append(Pixel(x, y))
 
 
-def constrain(value: int | float, low: int | float, high: int | float) -> int | float:
-    return max(low, min(high, value))
+def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[int | float, bool]:
+    return max(low, min(high, value)), value == max(low, min(high, value))
+
+
+def calculate_density(image: Image) -> float:
+    frozen_pixels = sum(pixel.frozen for row in image.values for pixel in row)
+    total_pixels = image.size**2
+    return frozen_pixels / total_pixels
+
+
+def get_connections(image: Image) -> Tuple[List[List[int | None]], List[List[int | None]]]:
+    inbound: List[List[int | None]] = [[] for _ in range(image.size**2)]
+    for x in range(image.size):
+        for y in range(image.size):
+            pixel = image.values[x][y]
+            if pixel.frozen and pixel.stuck_with:
+                index = pixel.stuck_with.x * image.size + pixel.stuck_with.y
+                inbound[index].append(x * image.size + y)
+            elif not pixel.frozen:
+                inbound[x * image.size + y].append(None)
+
+    outbound: List[List[int | None]] = [[] for _ in range(image.size**2)]
+    for index, inbound_connections in enumerate(inbound):
+        for inbound_connection in inbound_connections:
+            if inbound_connection is not None:
+                outbound[inbound_connection].append(index)
+            else:
+                outbound[index].append(None)  # Why does this work? IDK
+
+    return inbound, outbound
 
 
 def simulate_random_walk(image: Image, num_concurrent_walkers: int):
@@ -143,8 +171,8 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         for i, path in enumerate(walkers):
             # Randomly choose a direction to walk in
             direction = random.choice(directions)
-            x = constrain(path[-1][0] + direction[0], 0, image.size - 1)
-            y = constrain(path[-1][1] + direction[1], 0, image.size - 1)
+            x, _ = constrain(path[-1][0] + direction[0], 0, image.size - 1)
+            y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
             # Once we find the coordinates of a frozen pixel, we will freeze
             # the previous pixel along the path of the random walk
@@ -163,29 +191,24 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     return walkers
 
 
-def calculate_image_density(image: Image) -> float:
-    frozen_pixels = sum(pixel.frozen for row in image.values for pixel in row)
-    total_pixels = image.size**2
-    return frozen_pixels / total_pixels
-
-
 def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Image:
-    scale_factor = new_image_size / image.size
+    # Create new image
     new_image = Image(new_image_size)
 
-    def draw_bresenham_line(x0, y0, x1, y1, weight):
+    def draw_bresenham(x0, y0, x1, y1):
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
         sx = 1 if x0 < x1 else -1
         sy = 1 if y0 < y1 else -1
         err = dx - dy
-        points = []
+        line = []
 
         while True:
-            points.append((x0, y0))
+            line.append((x0, y0))
+
             if x0 == x1 and y0 == y1:
                 break
-            e2 = 2 * err
+            e2 = err * 2
             if e2 > -dy:
                 err -= dy
                 x0 += sx
@@ -193,56 +216,62 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 err += dx
                 y0 += sy
 
-        jittered_points = [points[0]]
-        for i in range(1, len(points) - 1):
-            x, y = points[i]
-            jitter_x = constrain(x + random.randint(-midpoint_jitter, midpoint_jitter), 0, new_image.size - 1)
-            jitter_y = constrain(y + random.randint(-midpoint_jitter, midpoint_jitter), 0, new_image.size - 1)
-            jittered_points.append((jitter_x, jitter_y))
-        jittered_points.append(points[-1])
+        line.reverse()
+        return line
 
-        for j in range(len(jittered_points) - 1):
-            x0, y0 = jittered_points[j]
-            x1, y1 = jittered_points[j + 1]
-            dx = abs(x1 - x0)
-            dy = abs(y1 - y0)
-            sx = 1 if x0 < x1 else -1
-            sy = 1 if y0 < y1 else -1
-            err = dx - dy
-
-            while True:
-                new_image.values[x0][y0].weight = weight
-                new_image.values[x0][y0].frozen = True
-                if x0 == x1 and y0 == y1:
-                    break
-                new_image.values[x0][y0].stuck_with = new_image.values[x1][y1]
-                e2 = 2 * err
-                if e2 > -dy:
-                    err -= dy
-                    x0 += sx
-                if e2 < dx:
-                    err += dx
-                    y0 += sy
-
+    # Translate pixels from old image onto new image
+    scale_factor = new_image_size / image.size
     for x in range(image.size):
         for y in range(image.size):
-            pixel = image.values[x][y]
-            if pixel.frozen:
-                new_x = int(x * scale_factor)
-                new_y = int(y * scale_factor)
-                new_image.values[new_x][new_y].weight = pixel.weight
-                new_image.values[new_x][new_y].frozen = True
-                new_image.values[new_x][new_y].stuck_with = pixel.stuck_with
+            if image.values[x][y].frozen:
+                pixel = image.values[x][y]
+                new_pixel = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
+                new_pixel.frozen = True
+                new_pixel.weight = pixel.weight
 
-                if pixel.stuck_with:
-                    old_stuck_x = pixel.stuck_with.x
-                    old_stuck_y = pixel.stuck_with.y
-                    new_stuck_x = int(old_stuck_x * scale_factor)
-                    new_stuck_y = int(old_stuck_y * scale_factor)
+    # We must now reconstruct every outbound connection from the original image
+    inbound, outbound = get_connections(image)
+    for i, outbound_connections in enumerate(outbound):
+        if None not in outbound_connections:
+            x0 = int((i // image.size) * scale_factor)
+            y0 = int((i % image.size) * scale_factor)
+            for outbound_connection in outbound_connections:
+                x1 = int((outbound_connection // image.size) * scale_factor)
+                y1 = int((outbound_connection % image.size) * scale_factor)
 
-                    draw_bresenham_line(new_x, new_y, new_stuck_x, new_stuck_y, pixel.weight)
+                # Perform midpoint jittering
+                mx = (x0 + x1) // 2
+                my = (y0 + y1) // 2
 
-    new_image.density = calculate_image_density(new_image)
+                jitter = random.randint(-midpoint_jitter, midpoint_jitter)
+                _, mx_preserved = constrain(mx + jitter, 0, new_image.size)
+                _, my_preserved = constrain(my + jitter, 0, new_image.size)
+
+                if mx_preserved and my_preserved:
+                    jitter_axis = random.choice(("X", "Y"))
+                    if jitter_axis == "X":
+                        mx += jitter
+                    elif jitter_axis == "Y":
+                        my += jitter
+
+                bresenham_lines = (draw_bresenham(x0, y0, mx, my), draw_bresenham(mx, my, x1, y1))
+
+                # Draw the bresenham lines
+                for bresenham_line in bresenham_lines:
+                    for prev_line_coord, (lx, ly) in enumerate(bresenham_line[1:]):
+                        line_pixel = new_image.values[lx][ly]
+                        line_pixel.weight = 100 + 20 * prev_line_coord
+                        line_pixel.frozen = True
+                        line_pixel.stuck_with = new_image.values[bresenham_line[prev_line_coord][0]][bresenham_line[prev_line_coord][1]]
+
+    if DEBUG:
+        for x in range(new_image_size):
+            for y in range(new_image_size):
+                pixel = new_image.values[x][y]
+                if pixel.stuck_with is not None:
+                    print(f"({pixel.x}, {pixel.y}) -> ({pixel.stuck_with.x}, {pixel.stuck_with.y})")
+
+    new_image.density = calculate_density(new_image)
 
     return new_image
 
@@ -251,11 +280,20 @@ def blurry_upscale(image: Image) -> Image:
     pass
 
 
-def soft_descent(x, a, k):
-    return (math.e**(-k*(x-(a/2)))) / (1 + math.e**(-k*(x-(a/2))))
+def soft_descent(x: int | float, a: int | float, k: int | float) -> float:
+    return (math.e ** (-k * (x - (a / 2)))) / (1 + math.e ** (-k * (x - (a / 2))))
 
 
-def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_rate: float, use_concurrent_walkers: bool, upscale_factor: float, upscale_jitter: int) -> List[Image]:
+def perform_dla(
+    seed: int,
+    initial_size: int,
+    end_size: int,
+    initial_density_threshold: float,
+    density_falloff_rate: float,
+    use_concurrent_walkers: bool,
+    upscale_factor: float,
+    upscale_jitter: int,
+) -> List[Image]:
     images = []
     image = Image(initial_size)
 
@@ -277,7 +315,7 @@ def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_thr
     central_pixel = image.values[image.size // 2][image.size // 2]
     central_pixel.weight = 255
     central_pixel.frozen = True
-    image.density = calculate_image_density(image)
+    image.density = calculate_density(image)
 
     for step in range(steps):
         # Calculate the density threshold for this step
@@ -304,7 +342,7 @@ def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_thr
             simulate_random_walk(image, num_concurrent_walkers)
 
             # Update image density
-            image.density = calculate_image_density(image)
+            image.density = calculate_density(image)
 
         # Before we upscale the image, lets add the current copy to images to
         # track the upscale history
@@ -321,7 +359,7 @@ def display_image(image: Image) -> None:
     for x in range(image.size):
         weights.append([])
         for y in range(image.size):
-            weights[x].append(image.values[x][y].weight)
+            weights[x].append(image.values[y][x].weight)
     weights = np.array(weights)
 
     plt.imshow(weights, cmap="terrain", origin="lower")
@@ -335,7 +373,16 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = perform_dla(seed=2005, initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_rate=2, use_concurrent_walkers=True, upscale_factor=2, upscale_jitter=1)
+    images = perform_dla(
+        seed=2,
+        initial_size=5,
+        end_size=1000,
+        initial_density_threshold=0.1,
+        density_falloff_rate=2,
+        use_concurrent_walkers=False,
+        upscale_factor=2,
+        upscale_jitter=2,
+    )
 
     for image in images:
         display_image(image)
@@ -345,5 +392,48 @@ def main():
     print(f"Execution time: {end_time - start_time} seconds")
 
 
+def set_pixel(image, x, y, sx, sy):
+    pixel = image.values[x][y]
+    pixel.frozen = True
+    pixel.weight = 255
+    pixel.stuck_with = image.values[sx][sy]
+
+
+def test():
+    image = Image(8)
+    set_pixel(image, 4, 4, 4, 4)
+    image.values[4][4].stuck_with = None
+    set_pixel(image, 5, 4, 4, 4)
+    set_pixel(image, 5, 5, 5, 4)
+    set_pixel(image, 3, 4, 4, 4)
+
+    display_image(image)
+
+    random.seed(0)
+
+    u1 = crisp_upscale(image, 8 * 3, 1)
+    u2 = crisp_upscale(u1, 8 * 6, 0)
+    u3 = crisp_upscale(u2, 8 * 9, 0)
+
+    # inbound, outbound = get_connections(u2)
+    # for i, connections in enumerate(outbound):
+    #     if None not in connections:
+    #         y = i % u2.size
+    #         x = i // u2.size
+    #         u2.values[x][y].weight = 200
+    #         print(f"({x}, {y})")
+    #
+    # for i, connections in enumerate(inbound):
+    #     if None not in connections:
+    #         y = i % u2.size
+    #         x = i // u2.size
+    #         u2.values[x][y].weight = 200
+    #         print(f"({x}, {y})")
+
+    display_image(u1)
+    display_image(u2)
+    display_image(u3)
+
+
 if __name__ == "__main__":
-    main()
+    test()
