@@ -195,6 +195,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     # we can use bresenham's line algorithm to roughly model an equation that
     # follows the edges of this geometry. This edges tuple can be generated
     # dependent on the geometry
+    # TODO: IDT Using edges is worth it
     edges = (
         ((0, image.size - 1), (0, 0)),  # Top
         ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
@@ -202,7 +203,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         ((0, 0), (0, image.size - 1)),  # Left
     )
 
-    directions = (  # TODO: Add other directions
+    directions = (
         (0, -1),  # North
         (1, -1),  # North East
         (1, 0),  # East
@@ -478,7 +479,7 @@ def traversable(image: Image) -> bool:
                         queue.append(neighbor)
         return False
 
-    directions = (  # TODO: Add other directions
+    directions = (
         (0, -1),  # North
         (1, -1),  # North East
         (1, 0),  # East
@@ -538,6 +539,9 @@ def main():
         upscale_jitter=5,
     )
 
+    end_time = time.time()
+    print(f"Image generation time: {end_time - start_time} seconds")
+
     if DEBUG:
         # Display image history
         for image in images:
@@ -550,9 +554,6 @@ def main():
         i = outbound.index([])
         print(f"({i // final_image.size}, {i % final_image.size}), {outbound.count([])}")
         print(traversable(final_image))
-
-    end_time = time.time()
-    print(f"Execution time: {end_time - start_time} seconds")
 
 
 def set_pixel(image, x, y, sx, sy):
