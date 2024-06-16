@@ -100,6 +100,7 @@ class Image:
     def __init__(self, size: int):
         self.size = size
         self.density = 0
+        self.origin = None
 
         self.values = []
         for x in range(size):
