@@ -190,6 +190,30 @@ def get_connections(image: Image) -> Tuple[List[List[int | None]], List[List[int
     return inbound, outbound
 
 
+def draw_bresenham(x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx - dy
+    line = []
+
+    while True:
+        line.append((x0, y0))
+
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = err * 2
+        if e2 > -dy:
+            err -= dy
+            x0 += sx
+        if e2 < dx:
+            err += dx
+            y0 += sy
+
+    return line
+
+
 def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
     line_segments = []
     visited = set()
@@ -219,32 +243,75 @@ def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tup
             if end_y > start_y:
                 line_segments.append(((x, start_y), (x, end_y)))
 
-    return line_segments
+    # Find split points for line segment
+    split_line_segments = copy.deepcopy(line_segments)
+    for i, line_segment in enumerate(line_segments):
+        (x0, y0), (x1, y1) = line_segment
+        line_points = draw_bresenham(x0, y0, x1, y1)
+        split_points = set()
 
+        for line_point in line_points:
+            x, y = line_point
 
-def draw_bresenham(x0, y0, x1, y1):
-    dx = abs(x1 - x0)
-    dy = abs(y1 - y0)
-    sx = 1 if x0 < x1 else -1
-    sy = 1 if y0 < y1 else -1
-    err = dx - dy
-    line = []
+            neighbor_points = ()
+            next_points = ()
+            if y0 == y1:
+                # We have a horizontal line, we need to check if it is split by
+                # any vertical lines
+                neighbor_points = (
+                    (0, -1),  # North
+                    (0, 1),  # South
+                )
+                next_points = (
+                    (1, 0),  # West
+                    (1, 0),  # East
+                )
+            elif x0 == x1:
+                # We have a vertical line, we need to check if it is split by any
+                # horizontal lines
+                neighbor_points = (
+                    (-1, 0),  # West
+                    (1, 0),  # East
+                )
+                next_points = (
+                    (0, -1),  # North
+                    (0, 1),  # South
+                )
 
-    while True:
-        line.append((x0, y0))
+            for dx, dy in neighbor_points:
+                neighbor_point_x, _ = constrain(x + dx, 0, image.size)
+                neighbor_point_y, _ = constrain(y + dy, 0, image.size)
 
-        if x0 == x1 and y0 == y1:
-            break
-        e2 = err * 2
-        if e2 > -dy:
-            err -= dy
-            x0 += sx
-        if e2 < dx:
-            err += dx
-            y0 += sy
+                for nx, ny in next_points:
+                    next_point_x, _ = constrain(x + nx, 0, image.size)
+                    next_point_y, _ = constrain(y + ny, 0, image.size)
 
-    return line
+                    if image.values[next_point_x][next_point_y].frozen:
+                        if image.values[neighbor_point_x][neighbor_point_y].frozen:
+                            split_points.add((x, y))
 
+        # Now lets split the line segment according to the split points
+        def split_segments(target, segments, split_points):
+            target_segment = segments[target]
+            new_segments = []
+            e0 = target_segment[0]
+            for i in range(len(split_points) + 1):
+                if i == len(split_points):
+                    e1 = target_segment[1]
+                else:
+                    e1 = split_points[i]
+                new_segments.append((e0, e1))
+                e0 = e1
+            return new_segments
+
+        if split_points:
+            new_segments = split_segments(i, line_segments, list(split_points))
+            # New segments must be inserted at i in place of what is already
+            # there
+            real_i = split_line_segments.index(line_segments[i])
+            split_line_segments = split_line_segments[:real_i] + new_segments + split_line_segments[real_i + 1:]
+
+    return split_line_segments
 
 def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     # Define edges and directions
@@ -457,7 +524,10 @@ def traversable(image: Image) -> bool:
             if current_pixel == target_pixel:
                 return True
             for direction in directions:
-                nx, ny = current_pixel.x + direction[0], current_pixel.y + direction[1]
+                nx, ny = (
+                    current_pixel.x + direction[0],
+                    current_pixel.y + direction[1],
+                )
                 if is_in_bounds(nx, ny):
                     neighbor = image.values[nx][ny]
                     if neighbor.frozen and (nx, ny) not in visited:
@@ -536,7 +606,12 @@ def main():
 
         # Ensure that there is only one pixel with no outbound connections
         final_image = images[-1]
-        print(final_image.origin.x, final_image.origin.y, final_image.origin.weight, final_image.origin.stuck_with)
+        print(
+            final_image.origin.x,
+            final_image.origin.y,
+            final_image.origin.weight,
+            final_image.origin.stuck_with,
+        )
         inbound, outbound = get_connections(final_image)
         i = outbound.index([])
         print(f"({i // final_image.size}, {i % final_image.size}), {outbound.count([])}")
@@ -560,16 +635,18 @@ def test():
     set_pixel(image, 3, 4, 4, 4)
     set_pixel(image, 3, 5, 3, 4)
     set_pixel(image, 2, 4, 3, 4)
+    set_pixel(image, 6, 4, 5, 4)
 
     display_image(image)
 
-    random.seed(0)
+    # random.seed(0)
 
     u1 = crisp_upscale(image, 8 * 3, 1)
     u2 = crisp_upscale(u1, 8 * 6, 1)
     u3 = crisp_upscale(u2, 8 * 9, 1)
 
-    line_segments = find_straight_line_segments(u3) # TODO: FIX THIS METHOD, ACCOUNT FOR DIAGONAL SEGMENTS
+    line_segments = find_straight_line_segments(u3)  # TODO: FIX THIS METHOD, ACCOUNT FOR DIAGONAL SEGMENTS
+    print(line_segments)
     for line_segment in line_segments:
         (x0, y0), (x1, y1) = line_segment
         mx = (x0 + x1) // 2
@@ -577,7 +654,7 @@ def test():
         u3.values[mx][my].weight = 200
 
         jx = random.randint(-2, 2)
-        jy = random.randint(-10, 0)
+        jy = random.randint(-2, 2)
         jmx = 0
         jmy = 0
         invalid = False
