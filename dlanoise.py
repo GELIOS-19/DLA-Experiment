@@ -250,6 +250,10 @@ def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tup
         line_points = draw_bresenham(x0, y0, x1, y1)
         split_points = set()
 
+        origin = (image.origin.x, image.origin.y)
+        if origin in line_points:
+            split_points.add(origin)
+
         for line_point in line_points:
             x, y = line_point
 
@@ -309,9 +313,10 @@ def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tup
             # New segments must be inserted at i in place of what is already
             # there
             real_i = split_line_segments.index(line_segments[i])
-            split_line_segments = split_line_segments[:real_i] + new_segments + split_line_segments[real_i + 1:]
+            split_line_segments = split_line_segments[:real_i] + new_segments + split_line_segments[real_i + 1 :]
 
     return split_line_segments
+
 
 def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     # Define edges and directions
@@ -380,69 +385,127 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     return walkers
 
 
-def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Image:
+def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> tuple[Image, Image]:
     # Create a new image
-    new_image = Image(new_image_size)
+    crisp_image = Image(new_image_size)
+    jittered_image = Image(new_image_size)
 
-    # Translate pixels from old image onto new image
-    scale_factor = new_image_size / image.size
+    new_images = (crisp_image, jittered_image)
 
-    # Preserve the image origin
-    new_image.origin = new_image.values[int(image.origin.x * scale_factor)][int(image.origin.y * scale_factor)]
+    for new_image in new_images:
+        # Translate pixels from old image onto new image
+        scale_factor = new_image_size / image.size
 
-    for x in range(image.size):
-        for y in range(image.size):
-            if image.values[x][y].frozen:
-                pixel = image.values[x][y]
-                new_pixel = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
-                new_pixel.frozen = True
-                new_pixel.weight = pixel.weight
+        # Preserve the image origin
+        new_image.origin = new_image.values[int(image.origin.x * scale_factor)][int(image.origin.y * scale_factor)]
 
-    # Reconstruct outbound connections
-    inbound, outbound = get_connections(image)
-    for i, outbound_connections in enumerate(outbound):
-        if None not in outbound_connections:
-            x0 = int((i // image.size) * scale_factor)
-            y0 = int((i % image.size) * scale_factor)
-            for outbound_connection in outbound_connections:
-                x1 = int((outbound_connection // image.size) * scale_factor)
-                y1 = int((outbound_connection % image.size) * scale_factor)
+        for x in range(image.size):
+            for y in range(image.size):
+                if image.values[x][y].frozen:
+                    pixel = image.values[x][y]
+                    new_pixel = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
+                    new_pixel.frozen = True
+                    new_pixel.weight = pixel.weight
 
-                bresenham_line = draw_bresenham(x0, y0, x1, y1)
-                for line_coord_i, (lx, ly) in enumerate(bresenham_line[:-1]):
-                    line_pixel = new_image.values[lx][ly]
-                    line_pixel.weight = 100 + 20 * line_coord_i
-                    line_pixel.frozen = True
-                    line_pixel.stuck_with = new_image.values[bresenham_line[line_coord_i + 1][0]][bresenham_line[line_coord_i + 1][1]]
+        # Reconstruct outbound connections
+        inbound, outbound = get_connections(image)
+        for oi, outbound_connections in enumerate(outbound):
+            if None not in outbound_connections:
+                x0 = int((oi // image.size) * scale_factor)
+                y0 = int((oi % image.size) * scale_factor)
+                for outbound_connection in outbound_connections:
+                    x1 = int((outbound_connection // image.size) * scale_factor)
+                    y1 = int((outbound_connection % image.size) * scale_factor)
+
+                    bresenham_line = draw_bresenham(x0, y0, x1, y1)
+                    for bi, (lx, ly) in enumerate(bresenham_line[:-1]):
+                        line_pixel = new_image.values[lx][ly]
+                        line_pixel.weight = 100 + 20 * bi
+                        line_pixel.frozen = True
+                        line_pixel.stuck_with = new_image.values[bresenham_line[bi + 1][0]][bresenham_line[bi + 1][1]]
+
+    # Perform jittering
+    line_segments = find_straight_line_segments(jittered_image)
+
+    if DEBUG:
+        print(line_segments)
+
+    for line_segment in line_segments:
+        (x0, y0), (x1, y1) = line_segment
+        mx = (x0 + x1) // 2
+        my = (y0 + y1) // 2
+        jittered_image.values[mx][my].weight = 200
+
+        jx = random.randint(-midpoint_jitter, midpoint_jitter)
+        jy = random.randint(-midpoint_jitter, midpoint_jitter)
+        jmx = 0
+        jmy = 0
+        invalid = False
+
+        if x0 == x1:
+            # Vertical Line
+            jmx, _ = constrain(mx + jx, 0, jittered_image.size - 1)
+            jmy, _ = constrain(my + jy, min(y0, y1), max(y0, y1))
+        elif y0 == y1:
+            # Horizontal
+            jmx, _ = constrain(mx + jx, min(x0, x1), max(x0, x1))
+            jmy, _ = constrain(my + jy, 0, jittered_image.size - 1)
+
+        jittered_image.values[jmx][jmy].weight = 400
+
+        b1 = draw_bresenham(x0, y0, jmx, jmy)
+        b2 = draw_bresenham(jmx, jmy, x1, y1)
+        bs = [b1, b2]
+
+        # Before we check the validity of bresenham lines, unfreeze the pixels
+        # in the line segment
+        line_segment_points = draw_bresenham(x0, y0, x1, y1)
+        for point in line_segment_points:
+            jittered_image.values[point[0]][point[1]].frozen = False
+
+        for b in bs:
+            for point in b:
+                if jittered_image.values[point[0]][point[1]].frozen:
+                    invalid = True
+                    break
+
+        if invalid:
+            # Re-freeze the points we unfroze
+            for point in line_segment_points:
+                jittered_image.values[point[0]][point[1]].frozen = True
+        else:
+            # Delete the points we unfroze
+            for point in line_segment_points:
+                jittered_image.values[point[0]][point[1]] = Pixel(point[0], point[1])
+            for b in bs:
+                for bi, point in enumerate(b[:-1]):
+                    pixel = jittered_image.values[point[0]][point[1]]
+                    pixel.frozen = True
+                    pixel.weight = 500
+                    # We don't have to worry about preserving the stuck_with
+                    # property of each pixel, as we will return the original
+                    # crisp image for further computations
 
     if DEBUG:
         for x in range(new_image_size):
             for y in range(new_image_size):
-                pixel = new_image.values[x][y]
+                pixel = crisp_image.values[x][y]
                 if pixel.stuck_with is not None:
                     print(f"({pixel.x}, {pixel.y}) -> ({pixel.stuck_with.x}, {pixel.stuck_with.y})")
 
-    new_image.density = calculate_density(new_image)
+    crisp_image.density = calculate_density(crisp_image)
 
-    return new_image
+    return crisp_image, jittered_image
 
 
 def blurry_upscale(image: Image) -> Image:
     pass
 
 
-def perform_dla(
-    seed: int,
-    initial_size: int,
-    end_size: int,
-    initial_density_threshold: float,
-    density_falloff_extremity: float,
-    density_falloff_bias: float,
-    use_concurrent_walkers: bool,
-    upscale_factor: float,
-    upscale_jitter: int,
-) -> List[Image]:
+def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, upscale_jitter: int) -> List[Image]:
     images = []
+    jittered_images = []
+
     image = Image(initial_size)
 
     # Seed the random generator
@@ -505,9 +568,12 @@ def perform_dla(
         images.append(copy.copy(image))
 
         # Upscale the image once step_density_threshold is met
-        image = crisp_upscale(image, image.size * 2, upscale_jitter)
+        image, jittered_image = crisp_upscale(image, image.size * 2, upscale_jitter)
 
-    return images
+        # Add the jittered image to jittered_images
+        jittered_images.append(jittered_image)
+
+    return images, jittered_images
 
 
 def traversable(image: Image) -> bool:
@@ -524,10 +590,7 @@ def traversable(image: Image) -> bool:
             if current_pixel == target_pixel:
                 return True
             for direction in directions:
-                nx, ny = (
-                    current_pixel.x + direction[0],
-                    current_pixel.y + direction[1],
-                )
+                nx, ny = (current_pixel.x + direction[0], current_pixel.y + direction[1])
                 if is_in_bounds(nx, ny):
                     neighbor = image.values[nx][ny]
                     if neighbor.frozen and (nx, ny) not in visited:
@@ -583,17 +646,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = perform_dla(
-        seed=2,
-        initial_size=50,
-        end_size=1000,
-        initial_density_threshold=0.1,
-        density_falloff_extremity=0.5,
-        density_falloff_bias=1 / 3,
-        use_concurrent_walkers=False,
-        upscale_factor=2,
-        upscale_jitter=1,
-    )
+    images, jittered_images = perform_dla(seed=2, initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=0.5, density_falloff_bias=1 / 3, use_concurrent_walkers=False, upscale_factor=2, upscale_jitter=10)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
@@ -604,14 +657,11 @@ def main():
             display_image(image)
             print(f"Image density: {image.density}")
 
+        display_image(jittered_images[-1])
+
         # Ensure that there is only one pixel with no outbound connections
         final_image = images[-1]
-        print(
-            final_image.origin.x,
-            final_image.origin.y,
-            final_image.origin.weight,
-            final_image.origin.stuck_with,
-        )
+        print(final_image.origin.x, final_image.origin.y, final_image.origin.weight, final_image.origin.stuck_with)
         inbound, outbound = get_connections(final_image)
         i = outbound.index([])
         print(f"({i // final_image.size}, {i % final_image.size}), {outbound.count([])}")
@@ -639,64 +689,11 @@ def test():
 
     display_image(image)
 
-    # random.seed(0)
+    random.seed(0)
 
-    u1 = crisp_upscale(image, 8 * 3, 1)
-    u2 = crisp_upscale(u1, 8 * 6, 1)
-    u3 = crisp_upscale(u2, 8 * 9, 1)
-
-    line_segments = find_straight_line_segments(u3)  # TODO: FIX THIS METHOD, ACCOUNT FOR DIAGONAL SEGMENTS
-    print(line_segments)
-    for line_segment in line_segments:
-        (x0, y0), (x1, y1) = line_segment
-        mx = (x0 + x1) // 2
-        my = (y0 + y1) // 2
-        u3.values[mx][my].weight = 200
-
-        jx = random.randint(-2, 2)
-        jy = random.randint(-2, 2)
-        jmx = 0
-        jmy = 0
-        invalid = False
-
-        if x0 == x1:
-            # Vertical Line
-            jmx, _ = constrain(mx + jx, 0, u3.size - 1)
-            jmy, _ = constrain(my + jy, min(y0, y1), max(y0, y1))
-        elif y0 == y1:
-            # Horizontal
-            jmx, _ = constrain(mx + jx, min(x0, x1), max(x0, x1))
-            jmy, _ = constrain(my + jy, 0, u3.size - 1)
-
-        u3.values[jmx][jmy].weight = 400
-
-        b1 = draw_bresenham(x0, y0, jmx, jmy)
-        b2 = draw_bresenham(jmx, jmy, x1, y1)
-        bs = [b1, b2]
-
-        # Before we check the validity of bresenham lines, unfreeze the pixels
-        # in the line segment
-        line_segment_points = draw_bresenham(x0, y0, x1, y1)
-        for point in line_segment_points:
-            u3.values[point[0]][point[1]].frozen = False
-
-        for b in bs:
-            for point in b:
-                if u3.values[point[0]][point[1]].frozen:
-                    invalid = True
-                    break
-
-        if invalid:
-            # Re-freeze the points we unfroze
-            for point in line_segment_points:
-                u3.values[point[0]][point[1]].frozen = True
-        else:
-            for b in bs:
-                for point in b[:-1]:
-                    pixel = u3.values[point[0]][point[1]]
-                    pixel.frozen = True
-                    pixel.weight = 600
-                    # TODO: FIX STUCK WITH FIELD
+    u1, j1 = crisp_upscale(image, 8 * 3, 10)
+    u2, j2 = crisp_upscale(u1, 8 * 6, 10)
+    u3, j3 = crisp_upscale(u2, 8 * 9, 5)
 
     i0, o0 = get_connections(image)
     i1, o1 = get_connections(u1)
@@ -707,12 +704,12 @@ def test():
 
     index = o3.index([])
     print(f"({index // u3.size}, {index % u3.size})")
-    print(len(line_segments))
 
     display_image(u1)
     display_image(u2)
     display_image(u3)
+    display_image(j3)
 
 
 if __name__ == "__main__":
-    test()
+    main()
