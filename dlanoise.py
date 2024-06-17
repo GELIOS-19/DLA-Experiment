@@ -190,6 +190,62 @@ def get_connections(image: Image) -> Tuple[List[List[int | None]], List[List[int
     return inbound, outbound
 
 
+def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    line_segments = []
+    visited = set()
+
+    for x in range(image.size):
+        for y in range(image.size):
+            if (x, y) in visited or not image.values[x][y].frozen:
+                continue  # Skip visited or non-frozen pixels
+
+            # Check for horizontal segments
+            start_x = x
+            end_x = x
+            while end_x + 1 < image.size and image.values[end_x + 1][y].frozen:
+                end_x += 1
+                visited.add((end_x, y))
+
+            if end_x > start_x:  # Only count segments longer than 1 pixel
+                line_segments.append(((start_x, y), (end_x, y)))
+
+            # Check for vertical segments
+            start_y = y
+            end_y = y
+            while end_y + 1 < image.size and image.values[x][end_y + 1].frozen:
+                end_y += 1
+                visited.add((x, end_y))
+
+            if end_y > start_y:
+                line_segments.append(((x, start_y), (x, end_y)))
+
+    return line_segments
+
+
+def draw_bresenham(x0, y0, x1, y1):
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx - dy
+    line = []
+
+    while True:
+        line.append((x0, y0))
+
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = err * 2
+        if e2 > -dy:
+            err -= dy
+            x0 += sx
+        if e2 < dx:
+            err += dx
+            y0 += sy
+
+    return line
+
+
 def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     # Define edges and directions
     # TODO: In the future, to make this code compatible with non-square geometry,
@@ -206,13 +262,13 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
 
     directions = (
         (0, -1),  # North
-        (1, -1),  # North East
+        # (1, -1),  # North East
         (1, 0),  # East
-        (1, 1),  # South East
+        # (1, 1),  # South East
         (0, 1),  # South
-        (-1, 1),  # South West
+        # (-1, 1),  # South West
         (-1, 0),  # West
-        (-1, -1),  # North West
+        # (-1, -1),  # North West
     )
 
     # Create a list of walkers
@@ -261,29 +317,6 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
     # Create a new image
     new_image = Image(new_image_size)
 
-    def draw_bresenham(x0, y0, x1, y1):
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-        line = []
-
-        while True:
-            line.append((x0, y0))
-
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = err * 2
-            if e2 > -dy:
-                err -= dy
-                x0 += sx
-            if e2 < dx:
-                err += dx
-                y0 += sy
-
-        return line
-
     # Translate pixels from old image onto new image
     scale_factor = new_image_size / image.size
 
@@ -308,60 +341,12 @@ def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> Im
                 x1 = int((outbound_connection // image.size) * scale_factor)
                 y1 = int((outbound_connection % image.size) * scale_factor)
 
-                mx = (x0 + x1) // 2
-                my = (y0 + y1) // 2
-
-                jx = random.randint(-midpoint_jitter, midpoint_jitter)
-                jy = random.randint(-midpoint_jitter, midpoint_jitter)
-
-                if x0 == x1:
-                    # If the x coords stay the same, this is a vertical line
-                    # If the line is vertical, we need to constrain the y
-                    # coord to remain within y0 and y1
-                    my, _ = constrain(my + jy, min(y0, y1), max(y0, y1))
-                    mx, _ = constrain(mx + jx, 0, new_image_size - 1)
-                elif y0 == y1:
-                    # If the y coords stay the same, this is a horizontal line
-                    # If the line is horizontal, we need to constrain the x
-                    # coord to remain between x0 and x1
-                    mx, _ = constrain(mx + jx, min(x0, x1), max(x0, x1))
-                    my, _ = constrain(my + jy, 0, new_image_size - 1)
-
-                # Now before we do anything, make sure that the jittered
-                # midpoint and the connecting bresenham lines do not override
-                # any existing pixels
-                bresenham_lines = []
-                b0 = draw_bresenham(x0, y0, x1, y1)
-                b1 = draw_bresenham(x0, y0, mx, my)
-                b2 = draw_bresenham(mx, my, x1, y1)
-                jitter_invalid = False
-
-                if new_image.values[mx][my].frozen:
-                    jitter_invalid = True
-                else:
-                    for bx1, by1 in b1:
-                        if new_image.values[bx1][by1].frozen:
-                            jitter_invalid = True
-                            break
-                    if not jitter_invalid:
-                        for bx2, by2 in b2:
-                            if new_image.values[bx2][by2].frozen:
-                                jitter_invalid = True
-                                break
-
-                if jitter_invalid:
-                    bresenham_lines.append(b0)
-                else:
-                    bresenham_lines.append(b1)
-                    bresenham_lines.append(b2)
-
-                # Draw the bresenham lines
-                for bresenham_line in bresenham_lines:
-                    for line_coord_i, (lx, ly) in enumerate(bresenham_line[:-1]):
-                        line_pixel = new_image.values[lx][ly]
-                        line_pixel.weight = 100 + 20 * line_coord_i
-                        line_pixel.frozen = True
-                        line_pixel.stuck_with = new_image.values[bresenham_line[line_coord_i + 1][0]][bresenham_line[line_coord_i + 1][1]]
+                bresenham_line = draw_bresenham(x0, y0, x1, y1)
+                for line_coord_i, (lx, ly) in enumerate(bresenham_line[:-1]):
+                    line_pixel = new_image.values[lx][ly]
+                    line_pixel.weight = 100 + 20 * line_coord_i
+                    line_pixel.frozen = True
+                    line_pixel.stuck_with = new_image.values[bresenham_line[line_coord_i + 1][0]][bresenham_line[line_coord_i + 1][1]]
 
     if DEBUG:
         for x in range(new_image_size):
@@ -537,7 +522,7 @@ def main():
         density_falloff_bias=1 / 3,
         use_concurrent_walkers=False,
         upscale_factor=2,
-        upscale_jitter=5,
+        upscale_jitter=1,
     )
 
     end_time = time.time()
@@ -551,6 +536,7 @@ def main():
 
         # Ensure that there is only one pixel with no outbound connections
         final_image = images[-1]
+        print(final_image.origin.x, final_image.origin.y, final_image.origin.weight, final_image.origin.stuck_with)
         inbound, outbound = get_connections(final_image)
         i = outbound.index([])
         print(f"({i // final_image.size}, {i % final_image.size}), {outbound.count([])}")
@@ -567,10 +553,13 @@ def set_pixel(image, x, y, sx, sy):
 def test():
     image = Image(8)
     set_pixel(image, 4, 4, 4, 4)
+    image.origin = image.values[4][4]
     image.values[4][4].stuck_with = None
     set_pixel(image, 5, 4, 4, 4)
     set_pixel(image, 5, 5, 5, 4)
     set_pixel(image, 3, 4, 4, 4)
+    set_pixel(image, 3, 5, 3, 4)
+    set_pixel(image, 2, 4, 3, 4)
 
     display_image(image)
 
@@ -579,6 +568,58 @@ def test():
     u1 = crisp_upscale(image, 8 * 3, 1)
     u2 = crisp_upscale(u1, 8 * 6, 1)
     u3 = crisp_upscale(u2, 8 * 9, 1)
+
+    line_segments = find_straight_line_segments(u3) # TODO: FIX THIS METHOD, ACCOUNT FOR DIAGONAL SEGMENTS
+    for line_segment in line_segments:
+        (x0, y0), (x1, y1) = line_segment
+        mx = (x0 + x1) // 2
+        my = (y0 + y1) // 2
+        u3.values[mx][my].weight = 200
+
+        jx = random.randint(-2, 2)
+        jy = random.randint(-10, 0)
+        jmx = 0
+        jmy = 0
+        invalid = False
+
+        if x0 == x1:
+            # Vertical Line
+            jmx, _ = constrain(mx + jx, 0, u3.size - 1)
+            jmy, _ = constrain(my + jy, min(y0, y1), max(y0, y1))
+        elif y0 == y1:
+            # Horizontal
+            jmx, _ = constrain(mx + jx, min(x0, x1), max(x0, x1))
+            jmy, _ = constrain(my + jy, 0, u3.size - 1)
+
+        u3.values[jmx][jmy].weight = 400
+
+        b1 = draw_bresenham(x0, y0, jmx, jmy)
+        b2 = draw_bresenham(jmx, jmy, x1, y1)
+        bs = [b1, b2]
+
+        # Before we check the validity of bresenham lines, unfreeze the pixels
+        # in the line segment
+        line_segment_points = draw_bresenham(x0, y0, x1, y1)
+        for point in line_segment_points:
+            u3.values[point[0]][point[1]].frozen = False
+
+        for b in bs:
+            for point in b:
+                if u3.values[point[0]][point[1]].frozen:
+                    invalid = True
+                    break
+
+        if invalid:
+            # Re-freeze the points we unfroze
+            for point in line_segment_points:
+                u3.values[point[0]][point[1]].frozen = True
+        else:
+            for b in bs:
+                for point in b[:-1]:
+                    pixel = u3.values[point[0]][point[1]]
+                    pixel.frozen = True
+                    pixel.weight = 600
+                    # TODO: FIX STUCK WITH FIELD
 
     i0, o0 = get_connections(image)
     i1, o1 = get_connections(u1)
@@ -589,6 +630,7 @@ def test():
 
     index = o3.index([])
     print(f"({index // u3.size}, {index % u3.size})")
+    print(len(line_segments))
 
     display_image(u1)
     display_image(u2)
@@ -596,4 +638,4 @@ def test():
 
 
 if __name__ == "__main__":
-    main()
+    test()
