@@ -1,12 +1,11 @@
 import copy
 from typing import List, Self, Tuple, Any
 import random
-import math
 import time
 
 import numpy as np
-import matplotlib.pyplot as plt
 from numpy import ndarray, dtype
+import matplotlib.pyplot as plt
 """
 Goal:
         Based on a technique presented in
@@ -26,15 +25,16 @@ Definitions:
 
 Steps:
         General Algorithm:
-                1. Starting with a small Image (see "Image" definition), we first
-                        place a pixel of maximum brightness at the center.
-                2. At a pseudo-random grid location determined by a seed value, we
-                        place another pixel (see "Pixel" definition) and perform a
-                        random walk through the grid until the pixel is adjacent to an
-                        existing pixel in the grid. We freeze this pixel in place.
-                3. We calculate the density of the image defined by comparing the
-                        number bright grid locations to the number of dark grid
-                        locations.
+                1. Starting with a small Image (see "Image" definition), we 
+                        first place a pixel of maximum brightness at the center.
+                2. At a pseudo-random grid location determined by a seed value, 
+                        we place another pixel (see "Pixel" definition) and 
+                        perform a random walk through the grid until the pixel 
+                        is adjacent to an existing pixel in the grid. We freeze 
+                        this pixel in place.
+                3. We calculate the density of the image defined by comparing 
+                        the number bright grid locations to the number of dark 
+                        grid locations.
                 4. We repeat steps 1-3 until the density passes a threshold, we
                         increase the size of the Image and upscale the pixels.
 
@@ -42,22 +42,24 @@ Steps:
                 There are two types of Image upscaling used in this algorithm: A
                 crisp upscale and a blurry upscale.
                 
-                5. When we perform an upscale on the Image, we need to perform both
-                        a crisp upscale and a blurry upscale.
+                5. When we perform an upscale on the Image, we need to perform 
+                        both a crisp upscale and a blurry upscale.
                 6. Taking the Image with the crisp upscale, we continue to add
-                        detail to this image through the process outlined in steps 1-4.
+                        detail to this image through the process outlined in 
+                        steps 1-4.
                 7. Once the density desired in step 4 is achieved, we add the
-                        detail from the crisp upscale to the blurry upscale, while
-                        keeping the crisp upscale for future crisp upscales.
+                        detail from the crisp upscale to the blurry upscale, 
+                        while keeping the crisp upscale for future crisp 
+                        upscales.
 
         Crisp Upscale:
                 8. When we perform step 2, we must keep track of the frozen
                         pixel that the new pixel gets stuck to.
                 9. Using the connections from step 8, we can redraw these
                         connections as lines using the scale of the new Image.
-                        10. The lines from step 9 can be split at their midpoint,
-                        and this midpoint can be jittered to create a more
-                        natural result.
+                10. The lines from step 9 can be split at their  midpoint, and 
+                        this midpoint can be jittered to create a  more natural
+                        result.
 
         Blurry Upscale:
                 11. Using the original crisp image, we first assign the
@@ -66,8 +68,8 @@ Steps:
                         weight of all the pixels downstream from the target.
                 13. Use the smooth falloff formula (1 - (1/(1+h)) to clamp
                         the weights of pixels of higher weights.
-                14. We then use spherical linear interpolation to upscale the Image
-                        to the new size.
+                14. We then use spherical linear interpolation to upscale the 
+                        Image to the new size.
                 15. Lastly, we use convolutions to assign each pixel a
                         weighted average of the adjacent pixels.
 """
@@ -113,6 +115,7 @@ def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[
 
 
 def falloff_curve(a: int | float, m: int | float, b: int | float, precision=10000) -> ndarray[Any, dtype[Any]] | None:
+
         def bezier_curve(t, P0, P1, P2, P3):
                 return (1 - t)**3 * P0 + 3 * (1 - t)**2 * t * P1 + 3 * (1 - t) * t**2 * P2 + t**3 * P3
 
@@ -229,7 +232,7 @@ def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tup
                                 end_x += 1
                                 visited.add((end_x, y))
 
-                        if end_x > start_x:  # Only count segments longer than 1 pixel
+                        if end_x > start_x:  # Only count segments longer than one pixel
                                 line_segments.append(((start_x, y), (end_x, y)))
 
                         # Check for vertical segments
@@ -259,8 +262,8 @@ def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tup
                         neighbor_points = ()
                         next_points = ()
                         if y0 == y1:
-                                # We have a horizontal line, we need to check if it is split by
-                                # any vertical lines
+                                # We have a horizontal line, we need to check if
+                                # it is split by any vertical lines
                                 neighbor_points = (
                                         (0, -1),  # North
                                         (0, 1),  # South
@@ -270,8 +273,8 @@ def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tup
                                         (1, 0),  # East
                                 )
                         elif x0 == x1:
-                                # We have a vertical line, we need to check if it is split by any
-                                # horizontal lines
+                                # We have a vertical line, we need to check if
+                                # it is split by any horizontal lines
                                 neighbor_points = (
                                         (-1, 0),  # West
                                         (1, 0),  # East
@@ -346,14 +349,9 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         walkers = []
         for walker in range(num_concurrent_walkers):
                 # Place a pixel at a random position along an edge of the image
-                # edge = random.choice(edges)
-                # x = random.randint(edge[0][0], edge[0][1])
-                # y = random.randint(edge[1][0], edge[1][1])
-                x = random.randint(0, image.size - 1)
-                y = random.randint(0, image.size - 1)
-                while image.values[x][y].frozen:
-                        x = random.randint(0, image.size - 1)
-                        y = random.randint(0, image.size - 1)
+                edge = random.choice(edges)
+                x = random.randint(edge[0][0], edge[0][1])
+                y = random.randint(edge[1][0], edge[1][1])
 
                 path = [(x, y)]
 
@@ -384,106 +382,94 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         return walkers
 
 
-def crisp_upscale(image: Image, new_image_size: int, midpoint_jitter: int) -> tuple[Image, Image]:
-        # Create a new image
+def crisp_upscale(image: Image, new_image_size: int, jitter_range: int) -> tuple[Image, Image]:
+        # Create a crisp image and a jittered image
         crisp_image = Image(new_image_size)
         jittered_image = Image(new_image_size)
 
         new_images = (crisp_image, jittered_image)
+        scale_factor = new_image_size / image.size
 
         for new_image in new_images:
-                # Translate pixels from old image onto new image
-                scale_factor = new_image_size / image.size
-
                 # Preserve the image origin
                 new_image.origin = new_image.values[int(image.origin.x * scale_factor)][int(image.origin.y * scale_factor)]
 
+                # Translate pixels from old image onto new image
                 for x in range(image.size):
                         for y in range(image.size):
                                 if image.values[x][y].frozen:
-                                        pixel = image.values[x][y]
-                                        new_pixel = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
-                                        new_pixel.frozen = True
-                                        new_pixel.weight = pixel.weight
+                                        pixel0 = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
+                                        pixel0.frozen = True
+                                        pixel0.weight = 200
 
                 # Reconstruct outbound connections
-                inbound, outbound = get_connections(image)
-                for oi, outbound_connections in enumerate(outbound):
-                        if None not in outbound_connections:
-                                x0 = int((oi // image.size) * scale_factor)
-                                y0 = int((oi % image.size) * scale_factor)
-                                for outbound_connection in outbound_connections:
-                                        x1 = int((outbound_connection // image.size) * scale_factor)
-                                        y1 = int((outbound_connection % image.size) * scale_factor)
+                _, outbound = get_connections(image)
+                for connections_index, connections in enumerate(outbound):
+                        if None not in connections:
+                                x0 = int((connections_index // image.size) * scale_factor)
+                                y0 = int((connections_index % image.size) * scale_factor)
 
-                                        bresenham_line = draw_bresenham(x0, y0, x1, y1)
-                                        for bi, (lx, ly) in enumerate(bresenham_line[:-1]):
-                                                line_pixel = new_image.values[lx][ly]
-                                                line_pixel.weight = 100 + 20 * bi
-                                                line_pixel.frozen = True
-                                                line_pixel.stuck_with = new_image.values[bresenham_line[bi + 1][0]][bresenham_line[bi + 1][1]]
+                                for connection in connections:
+                                        x1 = int((connection // image.size) * scale_factor)
+                                        y1 = int((connection % image.size) * scale_factor)
+
+                                        line_points = draw_bresenham(x0, y0, x1, y1)
+                                        for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
+                                                pixel1 = new_image.values[line_point_x][line_point_y]
+                                                pixel1.weight = 100 + 20 * line_point_index
+                                                pixel1.frozen = True
+
+                                                next_point = line_points[line_point_index + 1]
+                                                pixel1.stuck_with = new_image.values[next_point[0]][next_point[1]]
 
         # Perform jittering
-        line_segments = find_straight_line_segments(jittered_image)
+        straight_line_segments = find_straight_line_segments(jittered_image)
 
         if DEBUG:
-                print(line_segments)
+                print(straight_line_segments)
 
-        for line_segment in line_segments:
-                (x0, y0), (x1, y1) = line_segment
-                mx = (x0 + x1) // 2
-                my = (y0 + y1) // 2
-                jittered_image.values[mx][my].weight = 200
+        for straight_line_segment in straight_line_segments:
+                (x0, y0), (x1, y1) = straight_line_segment
+                midpoint_x = (x0 + x1) // 2
+                midpoint_y = (y0 + y1) // 2
+                jittered_image.values[midpoint_x][midpoint_y].weight = 200
 
-                jx = random.randint(-midpoint_jitter, midpoint_jitter)
-                jy = random.randint(-midpoint_jitter, midpoint_jitter)
-                jmx = 0
-                jmy = 0
-                invalid = False
+                jitter_x = random.randint(-jitter_range, jitter_range)
+                jitter_y = random.randint(-jitter_range, jitter_range)
+                jittered_midpoint_x = 0
+                jittered_midpoint_y = 0
 
                 if x0 == x1:
-                        # Vertical Line
-                        jmx, _ = constrain(mx + jx, 0, jittered_image.size - 1)
-                        jmy, _ = constrain(my + jy, min(y0, y1), max(y0, y1))
+                        # Vertical line
+                        jittered_midpoint_x, _ = constrain(midpoint_x + jitter_x, 0, jittered_image.size - 1)
+                        jittered_midpoint_y, _ = constrain(midpoint_y + jitter_y, min(y0, y1), max(y0, y1))
                 elif y0 == y1:
-                        # Horizontal
-                        jmx, _ = constrain(mx + jx, min(x0, x1), max(x0, x1))
-                        jmy, _ = constrain(my + jy, 0, jittered_image.size - 1)
+                        # Horizontal line
+                        jittered_midpoint_x, _ = constrain(midpoint_x + jitter_x, min(x0, x1), max(x0, x1))
+                        jittered_midpoint_y, _ = constrain(midpoint_y + jitter_y, 0, jittered_image.size - 1)
 
-                jittered_image.values[jmx][jmy].weight = 400
+                jittered_image.values[jittered_midpoint_x][jittered_midpoint_y].weight = 400
 
-                b1 = draw_bresenham(x0, y0, jmx, jmy)
-                b2 = draw_bresenham(jmx, jmy, x1, y1)
-                bs = [b1, b2]
+                jittered_line_segments = (
+                        draw_bresenham(x0, y0, jittered_midpoint_x, jittered_midpoint_y),
+                        draw_bresenham(jittered_midpoint_x, jittered_midpoint_y, x1, y1),
+                )
 
-                # Before we check the validity of bresenham lines, unfreeze the pixels
-                # in the line segment
-                line_segment_points = draw_bresenham(x0, y0, x1, y1)
-                for point in line_segment_points:
-                        jittered_image.values[point[0]][point[1]].frozen = False
+                # Delete the straight line segments
+                straight_line_segment_points = draw_bresenham(x0, y0, x1, y1)
+                for point in straight_line_segment_points:
+                        jittered_image.values[point[0]][point[1]] = Pixel(point[0], point[1])
 
-                for b in bs:
-                        for point in b:
-                                if jittered_image.values[point[0]][point[1]].frozen:
-                                        invalid = True
-                                        break
+                for jittered_line_segment in jittered_line_segments:
+                        for point4 in jittered_line_segment[:-1]:
+                                pixel2 = jittered_image.values[point4[0]][point4[1]]
 
-                if invalid:
-                        # Re-freeze the points we unfroze
-                        for point in line_segment_points:
-                                jittered_image.values[point[0]][point[1]].frozen = True
-                else:
-                        # Delete the points we unfroze
-                        for point in line_segment_points:
-                                jittered_image.values[point[0]][point[1]] = Pixel(point[0], point[1])
-                        for b in bs:
-                                for bi, point in enumerate(b[:-1]):
-                                        pixel = jittered_image.values[point[0]][point[1]]
-                                        pixel.frozen = True
-                                        pixel.weight = 500
-                                        # We don't have to worry about preserving the stuck_with
-                                        # property of each pixel, as we will return the original
-                                        # crisp image for further computations
+                                pixel2.frozen = True
+                                pixel2.weight = 500
+                                # We don't have to worry about preserving the
+                                # stuck_with property of each pixel, as we will
+                                # return the original crisp image for further
+                                # computations
 
         if DEBUG:
                 for x in range(new_image_size):
@@ -501,7 +487,17 @@ def blurry_upscale(image: Image) -> Image:
         pass
 
 
-def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, upscale_jitter: int) -> List[Image]:
+def perform_dla(
+        seed: int,
+        initial_size: int,
+        end_size: int,
+        initial_density_threshold: float,
+        density_falloff_extremity: float,
+        density_falloff_bias: float,
+        use_concurrent_walkers: bool,
+        upscale_factor: float,
+        upscale_jitter: int,
+) -> List[Image]:
         images = []
         jittered_images = []
 
@@ -562,12 +558,11 @@ def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_thr
                         # Update image density
                         image.density = calculate_density(image)
 
-                # Before we upscale the image, lets add the current copy to images to
-                # track the upscale history
-                images.append(copy.copy(image))
-
                 # Upscale the image once step_density_threshold is met
                 image, jittered_image = crisp_upscale(image, image.size * 2, step * upscale_jitter)
+
+                # Add image to images
+                images.append(copy.copy(image))
 
                 # Add the jittered image to jittered_images
                 jittered_images.append(jittered_image)
@@ -576,6 +571,7 @@ def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_thr
 
 
 def traversable(image: Image) -> bool:
+
         def is_in_bounds(x, y):
                 return 0 <= x < image.size and 0 <= y < image.size
 
@@ -645,69 +641,27 @@ def display_image(image: Image) -> None:
 def main():
         start_time = time.time()
 
-        images, jittered_images = perform_dla(seed=2, initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=0.5, density_falloff_bias=1 / 3, use_concurrent_walkers=False, upscale_factor=2, upscale_jitter=10)
+        images, jittered_images = perform_dla(
+                seed=random.randint(0, 1000),
+                initial_size=50,
+                end_size=1000,
+                initial_density_threshold=0.1,
+                density_falloff_extremity=0.5,
+                density_falloff_bias=1 / 2,
+                use_concurrent_walkers=False,
+                upscale_factor=2,
+                upscale_jitter=5,
+        )
 
         end_time = time.time()
         print(f"Image generation time: {end_time - start_time} seconds")
 
         if DEBUG:
-                # Display image history
                 for image in images:
                         display_image(image)
-                        print(f"Image density: {image.density}")
 
-                display_image(jittered_images[-1])
-
-                # Ensure that there is only one pixel with no outbound connections
-                final_image = images[-1]
-                print(final_image.origin.x, final_image.origin.y, final_image.origin.weight, final_image.origin.stuck_with)
-                inbound, outbound = get_connections(final_image)
-                i = outbound.index([])
-                print(f"({i // final_image.size}, {i % final_image.size}), {outbound.count([])}")
-                print(traversable(final_image))
-
-
-def set_pixel(image, x, y, sx, sy):
-        pixel = image.values[x][y]
-        pixel.frozen = True
-        pixel.weight = 255
-        pixel.stuck_with = image.values[sx][sy]
-
-
-def test():
-        image = Image(8)
-        set_pixel(image, 4, 4, 4, 4)
-        image.origin = image.values[4][4]
-        image.values[4][4].stuck_with = None
-        set_pixel(image, 5, 4, 4, 4)
-        set_pixel(image, 5, 5, 5, 4)
-        set_pixel(image, 3, 4, 4, 4)
-        set_pixel(image, 3, 5, 3, 4)
-        set_pixel(image, 2, 4, 3, 4)
-        set_pixel(image, 6, 4, 5, 4)
-
-        display_image(image)
-
-        random.seed(0)
-
-        u1, j1 = crisp_upscale(image, 8 * 3, 10)
-        u2, j2 = crisp_upscale(u1, 8 * 6, 10)
-        u3, j3 = crisp_upscale(u2, 8 * 9, 5)
-
-        i0, o0 = get_connections(image)
-        i1, o1 = get_connections(u1)
-        i2, o2 = get_connections(u2)
-        i3, o3 = get_connections(u3)
-
-        print([] in o0, [] in o1, [] in o2, [] in o3)
-
-        index = o3.index([])
-        print(f"({index // u3.size}, {index % u3.size})")
-
-        display_image(u1)
-        display_image(u2)
-        display_image(u3)
-        display_image(j3)
+                for jittered_image in jittered_images:
+                        display_image(jittered_image)
 
 
 if __name__ == "__main__":
