@@ -326,7 +326,6 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         # we can use bresenham's line algorithm to roughly model an equation that
         # follows the edges of this geometry. This edges tuple can be generated
         # dependent on the geometry
-        # TODO: IDT Using edges is worth it
         edges = (
                 ((0, image.size - 1), (0, 0)),  # Top
                 ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
