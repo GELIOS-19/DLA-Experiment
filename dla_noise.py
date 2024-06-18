@@ -340,7 +340,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         # Create a list of walkers
         walkers = []
         for walker in range(num_concurrent_walkers):
-                # Place a pixel at a random position along an edge of the 
+                # Place a pixel at a random position along an edge of the
                 # traversable_image
                 edge = random.choice(edges)
                 x = random.randint(edge[0][0], edge[0][1])
@@ -361,8 +361,8 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                         x, _ = constrain(path[-1][0] + direction[0], 0, image.size - 1)
                         y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
-                        # Once we find the coordinates of a frozen pixel, we 
-                        # will freeze the previous pixel along the path of the 
+                        # Once we find the coordinates of a frozen pixel, we
+                        # will freeze the previous pixel along the path of the
                         # random walk
                         if image.values[x][y].frozen:
                                 prev_x = path[-1][0]
@@ -437,7 +437,7 @@ def jitter_image(traversable_image: Image) -> Image:
 def vignette_image(traversable_image: Image, clamp: int) -> Image:
         new_image = Image(traversable_image.size)
 
-        # Set the origin of the new traversable_image to the same as it was in 
+        # Set the origin of the new traversable_image to the same as it was in
         # the input
         new_image.origin = new_image.values[traversable_image.origin.x][traversable_image.origin.y]
 
@@ -447,8 +447,9 @@ def vignette_image(traversable_image: Image, clamp: int) -> Image:
                 # Get the maximum number of downstream pixels for any pixel
                 # A downstream pixel is a pixel contained in inbound[index]
                 # For any index, there will be multiple downstream paths
-                # You must find the length of the longest path
-                # Return this number plus one
+                # We must find the length of the longest path and return this 
+                # number plus one to account for the fact that blank pixels
+                # should have a weight of 0
 
                 # DFS to find the longest path of downstream nodes
                 def dfs(node, memo):
@@ -465,7 +466,7 @@ def vignette_image(traversable_image: Image, clamp: int) -> Image:
         # Use the downstream count of each pixel to calculate its brightness
         downstream_counts = [0 for _ in range(traversable_image.size**2)]
 
-        # Start at the origin of the traversable_image and use BFS to explore 
+        # Start at the origin of the traversable_image and use BFS to explore
         # the graph
         origin = (traversable_image.origin.x, traversable_image.origin.y)
 
@@ -484,7 +485,7 @@ def vignette_image(traversable_image: Image, clamp: int) -> Image:
                                 visited.append(next_node)
                                 queue.append(next_node)
 
-        # Using the downstream_counts list, we can redraw the traversable_image 
+        # Using the downstream_counts list, we can redraw the traversable_image
         # where the weight is the downstream count of each pixel
         for pixel_index, downstream_count in enumerate(downstream_counts):
                 if downstream_count == 0:
@@ -564,7 +565,7 @@ def perform_dla(
 
                 # Simulate random walks
                 while image.density < step_density_threshold:
-                        # The number of concurrent walkers is calculated based 
+                        # The number of concurrent walkers is calculated based
                         # on density estimation
                         num_concurrent_walkers: int
                         if use_concurrent_walkers:
@@ -582,7 +583,7 @@ def perform_dla(
                 # Add traversable_image to images
                 images.append(copy.copy(image))
 
-                # Upscale the traversable_image once step_density_threshold is 
+                # Upscale the traversable_image once step_density_threshold is
                 # met
                 image = crisp_upscale(image, int(image.size * upscale_factor))
 
