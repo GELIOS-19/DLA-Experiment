@@ -90,6 +90,17 @@ GLOBAL_DIRECTIONS = (
 )
 
 
+class Direction(enum.Enum):
+        NORTH_WEST = 0
+        NORTH = 1
+        NORTH_EAST = 2
+        EAST = 3
+        SOUTH_EAST = 4
+        SOUTH = 5
+        SOUTH_WEST = 6
+        WEST = 7
+
+
 class Pixel:
         x: int
         y: int
@@ -199,7 +210,7 @@ def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], L
                         if inbound_connection is not None:
                                 outbound[inbound_connection].append(index)
                         else:
-                                outbound[index].append(None)  # TODO: Figure out why this makes sense
+                                outbound[index].append(None)
 
         return inbound, outbound
 
@@ -234,24 +245,12 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
         # connections are given by the get_connections function
         # When traversing with DFS, if there are multiple paths to explore at
         # a node, then that node represents the end of the line segment we just
-        # traversed and the beginning of both the line segments that may form
+        # traversed and the beginning of all the line segments that may form
         # from each path. Think about this recursively.
         # The line_segments list should contain pairs of the endpoints of each
         # line segment found
-        line_segments = []
-
-        class Direction(enum.Enum):
-                NORTH_WEST = 0
-                NORTH = 1
-                NORTH_EAST = 2
-                EAST = 3
-                SOUTH_EAST = 4
-                SOUTH = 5
-                SOUTH_WEST = 6
-                WEST = 7
-
         origin = [traversable_image.origin.x, traversable_image.origin.y, 0]
-        inbound, outbound = get_connections(traversable_image)
+        inbound, _ = get_connections(traversable_image)
 
         visited = []
         stack = deque()
@@ -263,7 +262,6 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
 
         intersection_points = []
         count = 0
-
         current_direction = None
 
         while stack:
@@ -342,7 +340,8 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         # Create a list of walkers
         walkers = []
         for walker in range(num_concurrent_walkers):
-                # Place a pixel at a random position along an edge of the traversable_image
+                # Place a pixel at a random position along an edge of the 
+                # traversable_image
                 edge = random.choice(edges)
                 x = random.randint(edge[0][0], edge[0][1])
                 y = random.randint(edge[1][0], edge[1][1])
@@ -362,8 +361,9 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                         x, _ = constrain(path[-1][0] + direction[0], 0, image.size - 1)
                         y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
-                        # Once we find the coordinates of a frozen pixel, we will freeze
-                        # the previous pixel along the path of the random walk
+                        # Once we find the coordinates of a frozen pixel, we 
+                        # will freeze the previous pixel along the path of the 
+                        # random walk
                         if image.values[x][y].frozen:
                                 prev_x = path[-1][0]
                                 prev_y = path[-1][1]
@@ -437,7 +437,8 @@ def jitter_image(traversable_image: Image) -> Image:
 def vignette_image(traversable_image: Image, clamp: int) -> Image:
         new_image = Image(traversable_image.size)
 
-        # Set the origin of the new traversable_image to the same as it was in the input
+        # Set the origin of the new traversable_image to the same as it was in 
+        # the input
         new_image.origin = new_image.values[traversable_image.origin.x][traversable_image.origin.y]
 
         inbound, _ = get_connections(traversable_image)
@@ -464,7 +465,8 @@ def vignette_image(traversable_image: Image, clamp: int) -> Image:
         # Use the downstream count of each pixel to calculate its brightness
         downstream_counts = [0 for _ in range(traversable_image.size**2)]
 
-        # Start at the origin of the traversable_image and use bfs to explore the graph
+        # Start at the origin of the traversable_image and use BFS to explore 
+        # the graph
         origin = (traversable_image.origin.x, traversable_image.origin.y)
 
         visited = [origin]
@@ -482,8 +484,8 @@ def vignette_image(traversable_image: Image, clamp: int) -> Image:
                                 visited.append(next_node)
                                 queue.append(next_node)
 
-        # Using the downstream_counts list, we can redraw the traversable_image where the weight
-        # is the downstream count of each pixel
+        # Using the downstream_counts list, we can redraw the traversable_image 
+        # where the weight is the downstream count of each pixel
         for pixel_index, downstream_count in enumerate(downstream_counts):
                 if downstream_count == 0:
                         continue
@@ -562,8 +564,8 @@ def perform_dla(
 
                 # Simulate random walks
                 while image.density < step_density_threshold:
-                        # The number of concurrent walkers is calculated based on density
-                        # estimation
+                        # The number of concurrent walkers is calculated based 
+                        # on density estimation
                         num_concurrent_walkers: int
                         if use_concurrent_walkers:
                                 total_pixels = image.size**2
@@ -580,7 +582,8 @@ def perform_dla(
                 # Add traversable_image to images
                 images.append(copy.copy(image))
 
-                # Upscale the traversable_image once step_density_threshold is met
+                # Upscale the traversable_image once step_density_threshold is 
+                # met
                 image = crisp_upscale(image, int(image.size * upscale_factor))
 
         return images
@@ -666,6 +669,7 @@ def main():
                 display_image(final_image)
                 vignette = vignette_image(final_image, 100)
                 display_image(vignette)
+                print(find_contiguous_line_segments(vignette))
 
 
 def test():
@@ -716,4 +720,4 @@ def test():
 
 
 if __name__ == "__main__":
-        test()
+        main()
