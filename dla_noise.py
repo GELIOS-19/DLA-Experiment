@@ -1,8 +1,9 @@
 import copy
-from typing import List, Self, Tuple, Any
+import enum
+from typing import List, Self, Tuple, Any, Optional, Dict
 import random
 import time
-from collections import deque
+from collections import deque, defaultdict
 
 import numpy as np
 from numpy import ndarray, dtype
@@ -16,7 +17,7 @@ Goal:
         looking veins.
 
 Definitions:
-        Image: An image that is represented by a square grid of floating point
+        Image: An traversable_image that is represented by a square grid of floating point
                 numbers between 0 and 255.
         Pixel: A grid location in the Image that holds a floating point value
                 between 0 and 255. Additionally, a Pixel will keep track of the
@@ -33,7 +34,7 @@ Steps:
                         perform a random walk through the grid until the pixel 
                         is adjacent to an existing pixel in the grid. We freeze 
                         this pixel in place.
-                3. We calculate the density of the image defined by comparing 
+                3. We calculate the density of the traversable_image defined by comparing 
                         the number bright grid locations to the number of dark 
                         grid locations.
                 4. We repeat steps 1-3 until the density passes a threshold, we
@@ -46,7 +47,7 @@ Steps:
                 5. When we perform an upscale on the Image, we need to perform 
                         both a crisp upscale and a blurry upscale.
                 6. Taking the Image with the crisp upscale, we continue to add
-                        detail to this image through the process outlined in 
+                        detail to this traversable_image through the process outlined in 
                         steps 1-4.
                 7. Once the density desired in step 4 is achieved, we add the
                         detail from the crisp upscale to the blurry upscale, 
@@ -63,7 +64,7 @@ Steps:
                         result.
 
         Blurry Upscale:
-                11. Using the original crisp image, we first assign the
+                11. Using the original crisp traversable_image, we first assign the
                         outermost pixels a weight of 1.
                 12. We then recursively assign other pixels the maximum
                         weight of all the pixels downstream from the target.
@@ -76,6 +77,17 @@ Steps:
 """
 
 DEBUG = True
+
+GLOBAL_DIRECTIONS = (
+        (-1, -1),  # North West
+        (0, -1),  # North
+        (1, -1),  # North East
+        (1, 0),  # East
+        (1, 1),  # South East
+        (0, 1),  # South
+        (-1, 1),  # South West
+        (-1, 0),  # West
+)
 
 
 class Pixel:
@@ -91,6 +103,9 @@ class Pixel:
                 self.weight = 0
                 self.frozen = False
                 self.struck = None
+
+        def __str__(self):
+                return f"Pixel(x={self.x}, y={self.y}, weight={self.weight}, frozen={self.frozen}, struck=({self.struck.x if self.struck else None}, {self.struck.y if self.struck else None}))"
 
 
 class Image:
@@ -133,27 +148,19 @@ def bezier_sigmoid(a: int | float, m: int | float, b: int | float, precision=100
         P0 = np.array([0.0, 1.0])
         P3 = np.array([a, 0.0])
 
-        # Calculate the y-intercept of the line (c)
         c = P0[1] - m * P0[0]
-
-        # Calculate x1 for P1 at y = 1
         x1 = (1 - c) / m
-
-        # Calculate x2 for P2 at y = 0
         x2 = (0 - c) / m
-
-        # Adjust x1 and x2 so that their midpoint is b
         midpoint = (x1 + x2) / 2
         offset = b - midpoint
         x1 += offset
         x2 += offset
+
         P1 = np.array([x1, 1.0])
         P2 = np.array([x2, 0.0])
 
-        # Create t values
+        # Find the bezier points
         t_values = np.linspace(0, 1, precision)
-
-        # Calculate Bézier curve points
         bezier_points = np.array([bezier_curve(t, P0, P1, P2, P3) for t in t_values])
 
         # Check if curve passes the vertical line test
@@ -175,18 +182,18 @@ def calculate_density(image: Image) -> float:
 
 
 # TODO: Optimize this function
-def get_connections(image: Image) -> Tuple[List[List[int | None]], List[List[int | None]]]:
-        inbound: List[List[int | None]] = [[] for _ in range(image.size**2)]
-        for x in range(image.size):
-                for y in range(image.size):
-                        pixel = image.values[x][y]
+def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], List[List[int | None]]]:
+        inbound: List[List[int | None]] = [[] for _ in range(traversable_image.size ** 2)]
+        for x in range(traversable_image.size):
+                for y in range(traversable_image.size):
+                        pixel = traversable_image.values[x][y]
                         if pixel.frozen and pixel.struck:
-                                index = pixel.struck.x * image.size + pixel.struck.y
-                                inbound[index].append(x * image.size + y)
+                                index = pixel.struck.x * traversable_image.size + pixel.struck.y
+                                inbound[index].append(x * traversable_image.size + y)
                         elif not pixel.frozen:
-                                inbound[x * image.size + y].append(None)
+                                inbound[x * traversable_image.size + y].append(None)
 
-        outbound: List[List[int | None]] = [[] for _ in range(image.size**2)]
+        outbound: List[List[int | None]] = [[] for _ in range(traversable_image.size ** 2)]
         for index, inbound_connections in enumerate(inbound):
                 for inbound_connection in inbound_connections:
                         if inbound_connection is not None:
@@ -221,108 +228,102 @@ def draw_bresenham(x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
         return line
 
 
-def find_straight_line_segments(image: Image) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+def find_contiguous_line_segments(traversable_image: Image) -> Any:
+        # Use DFS to find the coordinates of every line segment
+        # We must use DFS to traverse the entire graph, inbound and outbound
+        # connections are given by the get_connections function
+        # When traversing with DFS, if there are multiple paths to explore at
+        # a node, then that node represents the end of the line segment we just
+        # traversed and the beginning of both the line segments that may form
+        # from each path. Think about this recursively.
+        # The line_segments list should contain pairs of the endpoints of each
+        # line segment found
         line_segments = []
-        visited = set()
 
-        for x in range(image.size):
-                for y in range(image.size):
-                        if (x, y) in visited or not image.values[x][y].frozen:
-                                continue  # Skip visited or non-frozen pixels
+        class Direction(enum.Enum):
+                NORTH_WEST = 0
+                NORTH = 1
+                NORTH_EAST = 2
+                EAST = 3
+                SOUTH_EAST = 4
+                SOUTH = 5
+                SOUTH_WEST = 6
+                WEST = 7
 
-                        # Check for horizontal segments
-                        start_x = x
-                        end_x = x
-                        while end_x + 1 < image.size and image.values[end_x + 1][y].frozen:
-                                end_x += 1
-                                visited.add((end_x, y))
+        origin = [traversable_image.origin.x, traversable_image.origin.y, 0]
+        inbound, outbound = get_connections(traversable_image)
 
-                        if end_x > start_x:  # Only count segments longer than one pixel
-                                line_segments.append(((start_x, y), (end_x, y)))
+        visited = []
+        stack = deque()
 
-                        # Check for vertical segments
-                        start_y = y
-                        end_y = y
-                        while end_y + 1 < image.size and image.values[x][end_y + 1].frozen:
-                                end_y += 1
-                                visited.add((x, end_y))
+        visited.append(origin)
+        stack.append(origin)
 
-                        if end_y > start_y:
-                                line_segments.append(((x, start_y), (x, end_y)))
+        mappings = defaultdict(lambda: dict())
 
-        # Find split points for line segment
-        split_line_segments = copy.deepcopy(line_segments)
-        for i, line_segment in enumerate(line_segments):
-                (x0, y0), (x1, y1) = line_segment
-                line_points = draw_bresenham(x0, y0, x1, y1)
-                split_points = set()
+        intersection_points = []
+        count = 0
 
-                origin = (image.origin.x, image.origin.y)
-                if origin in line_points:
-                        split_points.add(origin)
+        current_direction = None
 
-                for line_point in line_points:
-                        x, y = line_point
+        while stack:
+                subject = stack.pop()
+                subject_index = subject[0] * traversable_image.size + subject[1]
 
-                        neighbor_points = ()
-                        next_points = ()
-                        if y0 == y1:
-                                # We have a horizontal line, we need to check if
-                                # it is split by any vertical lines
-                                neighbor_points = (
-                                        (0, -1),  # North
-                                        (0, 1),  # South
-                                )
-                                next_points = (
-                                        (1, 0),  # West
-                                        (1, 0),  # East
-                                )
-                        elif x0 == x1:
-                                # We have a vertical line, we need to check if
-                                # it is split by any horizontal lines
-                                neighbor_points = (
-                                        (-1, 0),  # West
-                                        (1, 0),  # East
-                                )
-                                next_points = (
-                                        (0, -1),  # North
-                                        (0, 1),  # South
-                                )
+                for node_index in reversed(inbound[subject_index]):
+                        node = [node_index // traversable_image.size, node_index % traversable_image.size, subject[2]]
 
-                        for dx, dy in neighbor_points:
-                                neighbor_point_x, _ = constrain(x + dx, 0, image.size)
-                                neighbor_point_y, _ = constrain(y + dy, 0, image.size)
+                        previous_direction = current_direction
 
-                                for nx, ny in next_points:
-                                        next_point_x, _ = constrain(x + nx, 0, image.size)
-                                        next_point_y, _ = constrain(y + ny, 0, image.size)
+                        if node[0] == subject[0]:
+                                if node[1] > subject[1]:
+                                        current_direction = Direction.NORTH
+                                elif node[1] < subject[1]:
+                                        current_direction = Direction.SOUTH
+                        elif node[1] == subject[1]:
+                                if node[0] > subject[0]:
+                                        current_direction = Direction.EAST
+                                elif node[0] < subject[0]:
+                                        current_direction = Direction.WEST
+                        elif node[0] > subject[0]:
+                                if node[1] > subject[1]:
+                                        current_direction = Direction.NORTH_EAST
+                                elif node[1] < subject[1]:
+                                        current_direction = Direction.SOUTH_EAST
+                        elif node[0] < subject[0]:
+                                if node[1] > subject[1]:
+                                        current_direction = Direction.NORTH_WEST
+                                elif node[1] < subject[1]:
+                                        current_direction = Direction.SOUTH_WEST
 
-                                        if image.values[next_point_x][next_point_y].frozen:
-                                                if image.values[neighbor_point_x][neighbor_point_y].frozen:
-                                                        split_points.add((x, y))
+                        is_origin = subject == origin
+                        is_intersection = len(inbound[subject_index]) > 1
+                        if is_intersection:
+                                intersection_points.append(node)
+                        is_direction_change_only = previous_direction is not None and (previous_direction != current_direction) and not is_intersection and subject not in intersection_points
 
-                # Now lets split the line segment according to the split points
-                def split_segments(target, segments, split_points):
-                        target_segment = segments[target]
-                        new_segments = []
-                        e0 = target_segment[0]
-                        for i in range(len(split_points) + 1):
-                                if i == len(split_points):
-                                        e1 = target_segment[1]
-                                else:
-                                        e1 = split_points[i]
-                                new_segments.append((e0, e1))
-                                e0 = e1
-                        return new_segments
+                        if is_origin or is_intersection or is_direction_change_only:
+                                mappings[count]["direction"] = current_direction
+                                mappings[count]["starts_at"] = subject
+                                node[2] = count
+                                count += 1
 
-                if split_points:
-                        new_segments = split_segments(i, line_segments, list(split_points))
-                        # New segments must be inserted at i in place of what is already
-                        # there
-                        real_i = split_line_segments.index(line_segments[i])
-                        split_line_segments = split_line_segments[:real_i] + new_segments + split_line_segments[real_i + 1:]
+                        if node[2] in mappings.keys():
+                                mappings[node[2]]["ends_at"] = node
 
-        return split_line_segments
+                        if DEBUG:
+                                print(node[2], is_intersection, is_direction_change_only, previous_direction, current_direction, subject, "->", node)
+
+                        visited.append(node)
+                        stack.append(node)
+
+        # Delete the extra segment number in the starts_at and ends_at fields
+        for key in mappings.keys():
+                if len(mappings[key]["starts_at"]) == 3 and len(mappings[key]["ends_at"]) == 3:
+                        del mappings[key]["starts_at"][2]
+                        del mappings[key]["ends_at"][2]
+
+        return dict(mappings)
 
 
 def simulate_random_walk(image: Image, num_concurrent_walkers: int):
@@ -338,17 +339,10 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                 ((0, 0), (0, image.size - 1)),  # Left
         )
 
-        directions = (
-                (0, -1),  # North
-                (1, 0),  # East
-                (0, 1),  # South
-                (-1, 0),  # West
-        )
-
         # Create a list of walkers
         walkers = []
         for walker in range(num_concurrent_walkers):
-                # Place a pixel at a random position along an edge of the image
+                # Place a pixel at a random position along an edge of the traversable_image
                 edge = random.choice(edges)
                 x = random.randint(edge[0][0], edge[0][1])
                 y = random.randint(edge[1][0], edge[1][1])
@@ -364,7 +358,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         while walkers:
                 for i, path in enumerate(walkers):
                         # Randomly choose a direction to walk in
-                        direction = random.choice(directions)
+                        direction = random.choice(GLOBAL_DIRECTIONS)
                         x, _ = constrain(path[-1][0] + direction[0], 0, image.size - 1)
                         y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
@@ -385,32 +379,32 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         return walkers
 
 
-def crisp_upscale(crisp_image: Image, new_image_size: int) -> Image:
-        # Create a new image
+def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
+        # Create a new traversable_image
         new_image = Image(new_image_size)
-        scale_factor = new_image_size / crisp_image.size
+        scale_factor = new_image_size / traversable_image.size
 
-        # Preserve the image origin
-        new_image.origin = new_image.values[int(crisp_image.origin.x * scale_factor)][int(crisp_image.origin.y * scale_factor)]
+        # Preserve the traversable_image origin
+        new_image.origin = new_image.values[int(traversable_image.origin.x * scale_factor)][int(traversable_image.origin.y * scale_factor)]
 
-        # Translate pixels from old image onto new image
-        for x in range(crisp_image.size):
-                for y in range(crisp_image.size):
-                        if crisp_image.values[x][y].frozen:
+        # Translate pixels from old traversable_image onto new traversable_image
+        for x in range(traversable_image.size):
+                for y in range(traversable_image.size):
+                        if traversable_image.values[x][y].frozen:
                                 core_pixel = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
                                 core_pixel.frozen = True
                                 core_pixel.weight = 200
 
         # Reconstruct outbound connections
-        _, outbound = get_connections(crisp_image)
+        _, outbound = get_connections(traversable_image)
         for connections_index, connections in enumerate(outbound):
                 if None not in connections:
-                        x0 = int((connections_index // crisp_image.size) * scale_factor)
-                        y0 = int((connections_index % crisp_image.size) * scale_factor)
+                        x0 = int((connections_index // traversable_image.size) * scale_factor)
+                        y0 = int((connections_index % traversable_image.size) * scale_factor)
 
                         for connection in connections:
-                                x1 = int((connection // crisp_image.size) * scale_factor)
-                                y1 = int((connection % crisp_image.size) * scale_factor)
+                                x1 = int((connection // traversable_image.size) * scale_factor)
+                                y1 = int((connection % traversable_image.size) * scale_factor)
 
                                 line_points = draw_bresenham(x0, y0, x1, y1)
                                 for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
@@ -421,7 +415,7 @@ def crisp_upscale(crisp_image: Image, new_image_size: int) -> Image:
                                         next_point = line_points[line_point_index + 1]
                                         line_pixel.struck = new_image.values[next_point[0]][next_point[1]]
 
-        # Calculate new image density
+        # Calculate new traversable_image density
         new_image.density = calculate_density(new_image)
 
         if DEBUG:
@@ -434,16 +428,19 @@ def crisp_upscale(crisp_image: Image, new_image_size: int) -> Image:
         return new_image
 
 
-def jitter_image(crisp_image: Image) -> Image:
+def jitter_image(traversable_image: Image) -> Image:
         # TODO: 2 things to experiment with:
         #       - Using bezier curves to jitter line segments
         pass
 
 
-def vignette_image(crisp_image: Image, clamp: int) -> Image:
-        new_image = Image(crisp_image.size)
+def vignette_image(traversable_image: Image, clamp: int) -> Image:
+        new_image = Image(traversable_image.size)
 
-        inbound, _ = get_connections(crisp_image)
+        # Set the origin of the new traversable_image to the same as it was in the input
+        new_image.origin = new_image.values[traversable_image.origin.x][traversable_image.origin.y]
+
+        inbound, _ = get_connections(traversable_image)
 
         def get_downstream_count(index: int) -> int:
                 # Get the maximum number of downstream pixels for any pixel
@@ -465,48 +462,48 @@ def vignette_image(crisp_image: Image, clamp: int) -> Image:
                 return dfs(index, {})
 
         # Use the downstream count of each pixel to calculate its brightness
-        downstream_counts = [0 for _ in range(crisp_image.size**2)]
+        downstream_counts = [0 for _ in range(traversable_image.size**2)]
 
-        # Start at the origin of the image and use bfs to explore the graph
-        origin = (crisp_image.origin.x, crisp_image.origin.y)
+        # Start at the origin of the traversable_image and use bfs to explore the graph
+        origin = (traversable_image.origin.x, traversable_image.origin.y)
 
         visited = [origin]
         queue = [origin]
 
         while queue:
                 subject = queue.pop(0)
-                subject_index = subject[0] * crisp_image.size + subject[1]
+                subject_index = subject[0] * traversable_image.size + subject[1]
 
                 downstream_counts[subject_index] = get_downstream_count(subject_index)
 
                 for node in inbound[subject_index]:
-                        next_node = (node // crisp_image.size, node % crisp_image.size)
+                        next_node = (node // traversable_image.size, node % traversable_image.size)
                         if next_node not in visited:
                                 visited.append(next_node)
                                 queue.append(next_node)
 
-        # Using the downstream_counts list, we can redraw the image where the weight
-        # is the in-degree of each pixel
+        # Using the downstream_counts list, we can redraw the traversable_image where the weight
+        # is the downstream count of each pixel
         for pixel_index, downstream_count in enumerate(downstream_counts):
                 if downstream_count == 0:
                         continue
 
-                x = pixel_index // crisp_image.size
-                y = pixel_index % crisp_image.size
+                x = pixel_index // traversable_image.size
+                y = pixel_index % traversable_image.size
                 pixel = new_image.values[x][y]
 
                 pixel.frozen = True
                 pixel.weight = int(clamp * smooth_falloff(downstream_count, 0.05))
 
-                if crisp_image.values[x][y].struck:
-                        pixel.struck = new_image.values[crisp_image.values[x][y].struck.x][crisp_image.values[x][y].struck.y]
+                if traversable_image.values[x][y].struck:
+                        pixel.struck = new_image.values[traversable_image.values[x][y].struck.x][traversable_image.values[x][y].struck.y]
 
         new_image.density = calculate_density(new_image)
 
         return new_image
 
 
-def blurry_upscale(crisp_image: Image) -> Image:
+def blurry_upscale(image: Image) -> Image:
         pass
 
 
@@ -522,7 +519,6 @@ def perform_dla(
         jitter_range: int,
 ) -> List[Image]:
         images = []
-        jittered_images = []
 
         image = Image(initial_size)
 
@@ -578,13 +574,13 @@ def perform_dla(
 
                         simulate_random_walk(image, num_concurrent_walkers)
 
-                        # Update image density
+                        # Update traversable_image density
                         image.density = calculate_density(image)
 
-                # Add image to images
+                # Add traversable_image to images
                 images.append(copy.copy(image))
 
-                # Upscale the image once step_density_threshold is met
+                # Upscale the traversable_image once step_density_threshold is met
                 image = crisp_upscale(image, int(image.size * upscale_factor))
 
         return images
@@ -604,7 +600,7 @@ def traversable(image: Image) -> bool:
                         current_pixel = queue.pop(0)
                         if current_pixel == target_pixel:
                                 return True
-                        for direction in directions:
+                        for direction in GLOBAL_DIRECTIONS:
                                 nx, ny = (current_pixel.x + direction[0], current_pixel.y + direction[1])
                                 if is_in_bounds(nx, ny):
                                         neighbor = image.values[nx][ny]
@@ -612,13 +608,6 @@ def traversable(image: Image) -> bool:
                                                 visited.add((nx, ny))
                                                 queue.append(neighbor)
                 return False
-
-        directions = (
-                (0, -1),  # North
-                (1, 0),  # East
-                (0, 1),  # South
-                (-1, 0),  # West
-        )
 
         if not image.origin or not image.origin.frozen:
                 return False
@@ -658,7 +647,7 @@ def main():
         start_time = time.time()
 
         images = perform_dla(
-                seed=0,
+                seed=2,
                 initial_size=50,
                 end_size=1000,
                 initial_density_threshold=0.1,
@@ -679,5 +668,52 @@ def main():
                 display_image(vignette)
 
 
+def test():
+        image = Image(10)
+
+        image.origin = image.values[5][5]
+        image.values[5][5].frozen = True
+        image.values[5][5].weight = 100
+
+        image.values[6][4].frozen = True
+        image.values[6][4].weight = 50
+        image.values[6][4].struck = image.values[5][5]
+
+        # image.values[5][6].frozen = True
+        # image.values[5][6].weight = 50
+        # image.values[5][6].struck = image.values[5][5]
+
+        image.values[7][3].frozen = True
+        image.values[7][3].weight = 40
+        image.values[7][3].struck = image.values[6][4]
+
+        image.values[5][3].frozen = True
+        image.values[5][3].weight = 40
+        image.values[5][3].struck = image.values[6][4]
+
+        image.values[6][5].frozen = True
+        image.values[6][5].weight = 40
+        image.values[6][5].struck = image.values[6][4]
+
+        image.values[7][5].frozen = True
+        image.values[7][5].weight = 30
+        image.values[7][5].struck = image.values[6][5]
+
+        # image.values[6][6].frozen = True
+        # image.values[6][6].weight = 30
+        # image.values[6][6].struck = image.values[6][5]
+
+        upscaled = crisp_upscale(image, 100)
+        upscaled.origin.weight = 1000
+
+        line_segments = find_contiguous_line_segments(upscaled)
+        print(line_segments)
+        print(upscaled.origin)
+        print(traversable(upscaled))
+
+        display_image(image)
+        display_image(upscaled)
+
+
 if __name__ == "__main__":
-        main()
+        test()
