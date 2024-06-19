@@ -428,13 +428,13 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
         return new_image
 
 
-def jitter_image(traversable_image: Image) -> Image:
+def jitter(traversable_image: Image) -> Image:
         # TODO: 2 things to experiment with:
         #       - Using bezier curves to jitter line segments
         pass
 
 
-def vignette_image(traversable_image: Image, clamp: int) -> Image:
+def vignette(traversable_image: Image, clamp: int) -> Image:
         new_image = Image(traversable_image.size)
 
         # Set the origin of the new traversable_image to the same as it was in
@@ -447,7 +447,7 @@ def vignette_image(traversable_image: Image, clamp: int) -> Image:
                 # Get the maximum number of downstream pixels for any pixel
                 # A downstream pixel is a pixel contained in inbound[index]
                 # For any index, there will be multiple downstream paths
-                # We must find the length of the longest path and return this 
+                # We must find the length of the longest path and return this
                 # number plus one to account for the fact that blank pixels
                 # should have a weight of 0
 
@@ -651,13 +651,13 @@ def main():
         start_time = time.time()
 
         images = perform_dla(
-                seed=2,
+                seed=random.randint(0, 1000),
                 initial_size=50,
                 end_size=1000,
                 initial_density_threshold=0.1,
                 density_falloff_extremity=2,
                 density_falloff_bias=1 / 2,
-                use_concurrent_walkers=False,
+                use_concurrent_walkers=True,
                 upscale_factor=2,
                 jitter_range=5,
         )
@@ -666,11 +666,11 @@ def main():
         print(f"Image generation time: {end_time - start_time} seconds")
 
         if DEBUG:
+                for image in images:
+                        display_image(vignette(image, 100))
+
                 final_image = images[-1]
-                display_image(final_image)
-                vignette = vignette_image(final_image, 100)
-                display_image(vignette)
-                print(find_contiguous_line_segments(vignette))
+                print(len(find_contiguous_line_segments(final_image)))
 
 
 def test():
