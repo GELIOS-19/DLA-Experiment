@@ -5,6 +5,7 @@ import random
 import time
 from collections import deque, defaultdict
 import math
+import cmath
 
 import numpy as np
 from numpy import ndarray, dtype
@@ -644,30 +645,22 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
                 pass
 
         def FFT(p):
-                if len(p) % 2 != 0:
-                        raise ValueError("FFT implementation does not support odd input polynomial degrees. Try padding the input to account for this.")
                 N = len(p)
-                y = []
-                for k in range(N):
-                        sum_complex = 0j
-                        for n in range(N):
-                                theta = -k * 2 * math.pi * n / N
-                                sum_complex += p[n] * complex(math.cos(theta), math.sin(theta))
-                        y.append(sum_complex / N)
-                return y
+                if N <= 1:
+                        return p
+                even = FFT(p[0::2])
+                odd = FFT(p[1::2])
+                T = [cmath.exp(-2j * cmath.pi * k / N) * odd[k % len(odd)] for k in range(N // 2)]
+                return [even[k] + T[k] for k in range(N // 2)] + [even[k] - T[k] for k in range(N // 2)]
 
-        def IFFT(p):
-                if len(p) % 2 != 0:
-                        raise ValueError("IFFT implementation does not support odd input polynomial degrees. Try padding the input to account for this.")
-                N = len(p)
-                y = []
-                for n in range(N):
-                        sum_complex = 0j
-                        for k in range(N):
-                                theta = k * 2 * math.pi * n / N
-                                sum_complex += p[k] * complex(math.cos(theta), math.sin(theta))
-                        y.append(round(sum_complex.real))
-                return y
+        def IFFT(y):
+                N = len(y)
+                if N <= 1:
+                        return y
+                even = IFFT(y[0::2])
+                odd = IFFT(y[1::2])
+                T = [cmath.exp(2j * cmath.pi * k / N) * odd[k % len(odd)] for k in range(N // 2)]
+                return [(even[k] + T[k]) / 2 for k in range(N // 2)] + [(even[k] - T[k]) / 2 for k in range(N // 2)]
 
         def FFT2(m):
                 FFT_rows = [FFT(row) for row in m]
@@ -678,7 +671,7 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         def IFFT2(m):
                 pass
 
-        print(IFFT(FFT([900, 2, 3] + [0])))
+        print(IFFT(FFT([900, 2, 3, 2])))
 
         return new_image
 
@@ -879,8 +872,9 @@ def test():
         # blurred_image = gaussian_blur(image, image.size // 2)
         # display_image(blurred_image)
 
-        display_image(bicubic_upscale(vignette(image, 300), 200))
+        u = bicubic_upscale(vignette(image, 300), 200)
+        display_image(gaussian_blur(u, u.size // 2))
 
 
 if __name__ == "__main__":
-        main()
+        test()
