@@ -160,10 +160,9 @@ class Image:
 
         @property
         def weights(self) -> List[List[int | float]]:
-                weights = [[0] * self.size] * self.size
+                weights = [[]] * self.size
                 for i in range(self.size):
-                        for j in range(self.size):
-                                weights[i][j] = self[i, j].weight
+                        weights[i] = [pixel.weight for pixel in self.values[i]]
                 return weights
 
 
@@ -609,7 +608,7 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
         return new_image
 
 
-def gaussian_blur(image: Image, kernel_size: int) -> Image:
+def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         # We need to perform gaussian blurs on the image using convolutions
         # A convolution is a mathematical operation that may be performed on
         # two multidimensional data, similar to multiplication and addition
@@ -630,7 +629,7 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         # between coefficient and value representations of polynomial functions
         # FFT is additionally used to convert a function from spatial domain to
         # frequency domain
-        # By converting a matrix of the image weights and the convolution kernel
+        # By converting a m of the image weights and the convolution kernel
         # into frequency domain, we effectively create two polynomials
         # Multiplying these polynomials will result in the convolution of the
         # kernel over the image weights
@@ -641,18 +640,18 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         new_image = Image(image.size)
 
         # Get the gaussian filter kernel for convolution
-        def create_kernel(size, omega):
-                gaussian_filter = [[0] * size] * size
+        def create_kernel(size, sigma):
+                gaussian_filter = [[0] * size for _ in range(size)]
 
                 center = size // 2
-                c = 1 / (2 * math.pi * omega ** 2)
+                c = 1 / (2 * math.pi * sigma ** 2)
 
                 total = 0
                 for i in range(size):
                         for j in range(size):
                                 x = i - center
                                 y = j - center
-                                gaussian_filter[i][j] = c * math.e ** -((x**2 + y**2) / (2 * omega ** 2))
+                                gaussian_filter[i][j] = c * math.e ** -((x**2 + y**2) / (2 * sigma ** 2))
                                 total += gaussian_filter[i][j]
 
                 for i in range(size):
@@ -661,31 +660,35 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
 
                 return gaussian_filter
 
-        kernel = create_kernel(kernel_size,  1)
+        kernel_base_size = round(6 * standard_deviation)
+        kernel = create_kernel(kernel_base_size if kernel_base_size % 2 == 1 else kernel_base_size + 1, standard_deviation)
 
         # Perform convolution using FFT
-        def pad_zeros_to_max_nearest_power_of_two(*matrices):
-                if not matrices:
+        def zero_pad(*ms):
+                if not ms:
                         return []
 
                 def nearest_power_of_two(n):
                         return 1 << (n - 1).bit_length()
 
-                max_rows = max(len(matrix) for matrix in matrices)
-                max_cols = max(max(len(row) for row in matrix) for matrix in matrices)
+                max_rows = max(len(m) for m in ms)
+                max_cols = max(max(len(row) for row in m) for m in ms)
 
                 target_rows = nearest_power_of_two(max_rows)
                 target_cols = nearest_power_of_two(max_cols)
 
-                def pad_matrix(matrix):
+                def pad_matrix(m):
                         padded = []
-                        for row in matrix:
-                                padded.append(row + [0] * (target_cols - len(row)))
+                        for row in m:
+                                padded.append([0] * (target_cols - len(row)) + row)
                         while len(padded) < target_rows:
-                                padded.append([0] * target_cols)
+                                padded.insert(0, [0] * target_cols)
                         return padded
 
-                return [pad_matrix(matrix) for matrix in matrices]
+                return [pad_matrix(matrix) for matrix in ms]
+
+        def crop(m, size):
+                return [row[size:len(m)] for row in m[size:len(m)]]
 
         def FFT(p):
                 N = len(p)
@@ -717,12 +720,29 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
                 IFFT_cols = [IFFT(col) for col in transpose]
                 return list(zip(*IFFT_cols))
 
+        def complex_mult(a, b):
+                return [[a[i][j] * b[i][j] for j in range(len(a[0]))] for i in range(len(a))]
+
         # Pad the image weights and the kernel
-        padded_weights, padded_kernel = pad_zeros_to_max_nearest_power_of_two(image.weights, kernel)
+        padded_weights, padded_kernel = zero_pad(image.weights, kernel)
 
         # Apply FFT2 to the weights and the kernel to convert them to frequency domain
-        # Use FFT and IFFT to calculate the product of FFT2(weights) and FFT2(kernel)
+        FFT_weights = FFT2(padded_weights)
+        FFT_kernel = FFT2(padded_kernel)
+
+        # Calculate the product
+        FFT_product = complex_mult(FFT_weights, FFT_kernel)
+
         # Use IFFT2 to convert the product back into spatial domain
+        convolved_image = IFFT2(FFT_product)
+
+        # Crop image to original size
+        blurred_weights = crop(convolved_image, len(convolved_image) - new_image.size)
+
+        # Transfer blurred_weights to new image
+        for i in range(new_image.size):
+                for j in range(new_image.size):
+                        new_image[i, j].weight = blurred_weights[i][j].real
 
         return new_image
 
@@ -923,8 +943,10 @@ def test():
         # blurred_image = gaussian_blur(image, image.size // 2)
         # display_image(blurred_image)
 
-        u = bicubic_upscale(vignette(image, 300), 200)
-        display_image(gaussian_blur(u, u.size // 2))
+        display_image(image)
+        upscaled = bilinear_upscale(image, 300)
+        display_image(upscaled)
+        display_image(gaussian_blur(upscaled, 3))
 
 
 if __name__ == "__main__":
