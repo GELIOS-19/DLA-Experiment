@@ -146,11 +146,25 @@ class Image:
                         raise IndexError("Pixel index out of range")
 
         def __add__(self, other: Self) -> Self:
-                pass
+                if self.size != other.size:
+                        raise ArithmeticError("Cannot add the weights of two images with different sizes")
+                new_image = Image(self.size)
+                for i in range(self.size):
+                        for j in range(self.size):
+                                new_image[i, j].weight = self[i, j].weight + other[i, j].weight
+                return new_image
 
         @property
         def traversable(self) -> bool:
                 return True
+
+        @property
+        def weights(self) -> List[List[int | float]]:
+                weights = [[0] * self.size] * self.size
+                for i in range(self.size):
+                        for j in range(self.size):
+                                weights[i][j] = self[i, j].weight
+                return weights
 
 
 def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[int | float, bool]:
@@ -532,21 +546,21 @@ def bilinear_upscale(image: Image, new_image_size: int) -> Image:
                         x = ((i + 0.5) / scale_factor) - 0.5
                         y = ((j + 0.5) / scale_factor) - 0.5
 
-                        int_x = int(x)
-                        int_y = int(y)
+                        x_floor = int(x)
+                        y_floor = int(y)
 
-                        x_difference = (x - int_x)
-                        y_difference = (y - int_y)
+                        x_diff = (x - x_floor)
+                        y_diff = (y - y_floor)
 
-                        top_left_weight = image[int_x, int_y].weight
-                        top_right_weight = image[constrain(int_x + 1, 0, image.size - 1)[0], int_y].weight
-                        bottom_left_weight = image[int_x, constrain(int_y + 1, 0, image.size - 1)[0]].weight
-                        bottom_right_weight = image[constrain(int_x + 1, 0, image.size - 1)[0], constrain(int_y + 1, 0, image.size - 1)[0]].weight
+                        top_left_weight = image[x_floor, y_floor].weight
+                        top_right_weight = image[constrain(x_floor + 1, 0, image.size - 1)[0], y_floor].weight
+                        bottom_left_weight = image[x_floor, constrain(y_floor + 1, 0, image.size - 1)[0]].weight
+                        bottom_right_weight = image[constrain(x_floor + 1, 0, image.size - 1)[0], constrain(y_floor + 1, 0, image.size - 1)[0]].weight
 
-                        top_weight = top_right_weight * x_difference + top_left_weight * (1 - x_difference)
-                        bottom_weight = bottom_right_weight * x_difference + bottom_left_weight * (1 - x_difference)
+                        top_weight = top_right_weight * x_diff + top_left_weight * (1 - x_diff)
+                        bottom_weight = bottom_right_weight * x_diff + bottom_left_weight * (1 - x_diff)
 
-                        interpolated_weight = bottom_weight * y_difference + top_weight * (1 - y_difference)
+                        interpolated_weight = bottom_weight * y_diff + top_weight * (1 - y_diff)
                         new_image[i, j].weight = interpolated_weight
 
         return new_image
@@ -614,6 +628,15 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         #
         # The FFT (Fast Fourier Transform) algorithm can efficiently convert
         # between coefficient and value representations of polynomial functions
+        # FFT is additionally used to convert a function from spatial domain to
+        # frequency domain
+        # By converting a matrix of the image weights and the convolution kernel
+        # into frequency domain, we effectively create two polynomials
+        # Multiplying these polynomials will result in the convolution of the
+        # kernel over the image weights
+        # By using IFFT, we can convert the product polynomial from frequency
+        # domain back into spatial domain, returning the weights of the blurred
+        # image
 
         new_image = Image(image.size)
 
@@ -641,8 +664,28 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         kernel = create_kernel(kernel_size,  1)
 
         # Perform convolution using FFT
-        def pad_zeros(m):
-                pass
+        def pad_zeros_to_max_nearest_power_of_two(*matrices):
+                if not matrices:
+                        return []
+
+                def nearest_power_of_two(n):
+                        return 1 << (n - 1).bit_length()
+
+                max_rows = max(len(matrix) for matrix in matrices)
+                max_cols = max(max(len(row) for row in matrix) for matrix in matrices)
+
+                target_rows = nearest_power_of_two(max_rows)
+                target_cols = nearest_power_of_two(max_cols)
+
+                def pad_matrix(matrix):
+                        padded = []
+                        for row in matrix:
+                                padded.append(row + [0] * (target_cols - len(row)))
+                        while len(padded) < target_rows:
+                                padded.append([0] * target_cols)
+                        return padded
+
+                return [pad_matrix(matrix) for matrix in matrices]
 
         def FFT(p):
                 N = len(p)
@@ -669,9 +712,17 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
                 return list(col for col in zip(*FFT_cols))
 
         def IFFT2(m):
-                pass
+                IFFT_rows = [IFFT(row) for row in m]
+                transpose = list(zip(*IFFT_rows))
+                IFFT_cols = [IFFT(col) for col in transpose]
+                return list(zip(*IFFT_cols))
 
-        print(IFFT(FFT([900, 2, 3, 2])))
+        # Pad the image weights and the kernel
+        padded_weights, padded_kernel = pad_zeros_to_max_nearest_power_of_two(image.weights, kernel)
+
+        # Apply FFT2 to the weights and the kernel to convert them to frequency domain
+        # Use FFT and IFFT to calculate the product of FFT2(weights) and FFT2(kernel)
+        # Use IFFT2 to convert the product back into spatial domain
 
         return new_image
 
