@@ -551,6 +551,49 @@ def bilinear_upscale(image: Image, new_image_size: int) -> Image:
         return new_image
 
 
+# BELOW FUNCTION WAS IMPLEMENTED BY CHATGPT
+def bicubic_upscale(image: Image, new_image_size: int) -> Image:
+        new_image = Image(new_image_size)
+        scale_factor = new_image_size / image.size
+
+        # Cubic interpolation function
+        def cubic(x):
+                abs_x = abs(x)
+                if abs_x <= 1:
+                        return 1 - 2 * abs_x ** 2 + abs_x ** 3
+                elif 1 < abs_x < 2:
+                        return 4 - 8 * abs_x + 5 * abs_x ** 2 - abs_x ** 3
+                else:
+                        return 0
+
+        # Get interpolated value at specified coordinate
+        def get_interpolated_value(x, y):
+                x_floor = int(x)
+                y_floor = int(y)
+                x_diff = x - x_floor
+                y_diff = y - y_floor
+
+                result = 0
+                for m in range(-1, 3):
+                        for n in range(-1, 3):
+                                x_index = int(constrain(x_floor + m, 0, image.size - 1)[0])
+                                y_index = int(constrain(y_floor + n, 0, image.size - 1)[0])
+                                weight = image[x_index, y_index].weight
+                                result += weight * cubic(m - x_diff) * cubic(n - y_diff)
+
+                return max(0, result)
+
+        # Apply interpolation across the new image
+        for i in range(new_image_size):
+                for j in range(new_image_size):
+                        x_orig = (i + 0.5) / scale_factor - 0.5
+                        y_orig = (j + 0.5) / scale_factor - 0.5
+                        interpolated_weight = get_interpolated_value(x_orig, y_orig)
+                        new_image[i, j].weight = interpolated_weight
+
+        return new_image
+
+
 def gaussian_blur(image: Image, kernel_size: int) -> Image:
         # We need to perform gaussian blurs on the image using convolutions
         # A convolution is a mathematical operation that may be performed on
@@ -574,18 +617,18 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         new_image = Image(image.size)
 
         # Get the gaussian filter kernel for convolution
-        def create_kernel(size, standard_deviation):
-                gaussian_filter = [[0 for _ in range(size)] for _ in range(size)]
+        def create_kernel(size, omega):
+                gaussian_filter = [[0] * size] * size
 
                 center = size // 2
-                constant_term = 1 / (2 * math.pi * standard_deviation ** 2)
+                c = 1 / (2 * math.pi * omega ** 2)
 
                 total = 0
                 for i in range(size):
                         for j in range(size):
                                 x = i - center
                                 y = j - center
-                                gaussian_filter[i][j] = constant_term * math.e ** -((x**2 + y**2) / (2 * standard_deviation ** 2))
+                                gaussian_filter[i][j] = c * math.e ** -((x**2 + y**2) / (2 * omega ** 2))
                                 total += gaussian_filter[i][j]
 
                 for i in range(size):
@@ -597,39 +640,45 @@ def gaussian_blur(image: Image, kernel_size: int) -> Image:
         kernel = create_kernel(kernel_size,  1)
 
         # Perform convolution using FFT
-        def pad_input(p):
-                next_pow2 = 2 ** math.ceil(math.log2(len(p)))
-                return p + [0] * (next_pow2 - len(p))
+        def pad_zeros(m):
+                pass
 
         def FFT(p):
-                n = len(p)
-                if n <= 1:
-                        return p
-                omega = math.e ** ((2j * math.pi) / n)
-                pe, po = p[::2], p[1::2]
-                ye = FFT(pe)
-                yo = FFT(po)
-                y = [0] * n
-                for j in range(n // 2):
-                        y[j] = (ye[j] + omega**j * yo[j])
-                        y[j + n // 2] = ye[j] - (omega**j * yo[j])
+                if len(p) % 2 != 0:
+                        raise ValueError("FFT implementation does not support odd input polynomial degrees. Try padding the input to account for this.")
+                N = len(p)
+                y = []
+                for k in range(N):
+                        sum_complex = 0j
+                        for n in range(N):
+                                theta = -k * 2 * math.pi * n / N
+                                sum_complex += p[n] * complex(math.cos(theta), math.sin(theta))
+                        y.append(sum_complex / N)
                 return y
 
         def IFFT(p):
-                n = len(p)
-                if n <= 1:
-                        return p
-                omega = math.e ** ((-2j * math.pi) / n)
-                pe, po = p[::2], p[1::2]
-                ye = IFFT(pe)
-                yo = IFFT(po)
-                y = [0] * n
-                for j in range(n // 2):
-                        y[j] = ye[j] + (omega ** j * yo[j])
-                        y[j + n // 2] = ye[j] - (omega ** j * yo[j])
-                return [a/n for a in y]  # Normalize by n
+                if len(p) % 2 != 0:
+                        raise ValueError("IFFT implementation does not support odd input polynomial degrees. Try padding the input to account for this.")
+                N = len(p)
+                y = []
+                for n in range(N):
+                        sum_complex = 0j
+                        for k in range(N):
+                                theta = k * 2 * math.pi * n / N
+                                sum_complex += p[k] * complex(math.cos(theta), math.sin(theta))
+                        y.append(round(sum_complex.real))
+                return y
 
-        
+        def FFT2(m):
+                FFT_rows = [FFT(row) for row in m]
+                transpose = list(zip(*FFT_rows))
+                FFT_cols = [FFT(col) for col in transpose]
+                return list(col for col in zip(*FFT_cols))
+
+        def IFFT2(m):
+                pass
+
+        print(IFFT(FFT([900, 2, 3] + [0])))
 
         return new_image
 
@@ -787,7 +836,7 @@ def main():
 
         if DEBUG:
                 image = images[0]
-                blurry_image = bilinear_upscale(vignette(image, 300), 500)
+                blurry_image = bicubic_upscale(vignette(image, 300), 500)
                 display_image(blurry_image)
                 # print(len(find_contiguous_line_segments(final_image)))
 
@@ -827,9 +876,11 @@ def test():
         # image.values[6][6].weight = 30
         # image.values[6][6].struck = image.values[6][5]
 
-        blurred_image = gaussian_blur(image, image.size // 2)
-        display_image(blurred_image)
+        # blurred_image = gaussian_blur(image, image.size // 2)
+        # display_image(blurred_image)
+
+        display_image(bicubic_upscale(vignette(image, 300), 200))
 
 
 if __name__ == "__main__":
-        test()
+        main()
