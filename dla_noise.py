@@ -4,6 +4,7 @@ from typing import List, Self, Tuple, Any, Optional, Dict
 import random
 import time
 from collections import deque, defaultdict
+import math
 
 import numpy as np
 from numpy import ndarray, dtype
@@ -70,7 +71,7 @@ Steps:
                         weight of all the pixels downstream from the target.
                 13. Use the smooth falloff formula (1 - (1/(1+h)) to clamp
                         the weights of pixels of higher weights.
-                14. We then use spherical linear interpolation to upscale the 
+                14. We then use bicubic interpolation to upscale the 
                         Image to the new size.
                 15. Lastly, we use convolutions to assign each pixel a
                         weighted average of the adjacent pixels.
@@ -136,6 +137,20 @@ class Image:
                         for y in range(size):
                                 self.values[x].append(Pixel(x, y))
 
+        def __getitem__(self, index):
+                x, y = index
+                if 0 <= x < self.size and 0 <= y < self.size:
+                        return self.values[x][y]
+                else:
+                        raise IndexError("Pixel index out of range")
+
+        def __add__(self, other: Self) -> Self:
+                pass
+
+        @property
+        def traversable(self) -> bool:
+                return True
+
 
 def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[int | float, bool]:
         return max(low, min(high, value)), value == max(low, min(high, value))
@@ -194,7 +209,7 @@ def calculate_density(image: Image) -> float:
 
 # TODO: Optimize this function
 def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], List[List[int | None]]]:
-        inbound: List[List[int | None]] = [[] for _ in range(traversable_image.size ** 2)]
+        inbound: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
         for x in range(traversable_image.size):
                 for y in range(traversable_image.size):
                         pixel = traversable_image.values[x][y]
@@ -204,7 +219,7 @@ def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], L
                         elif not pixel.frozen:
                                 inbound[x * traversable_image.size + y].append(None)
 
-        outbound: List[List[int | None]] = [[] for _ in range(traversable_image.size ** 2)]
+        outbound: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
         for index, inbound_connections in enumerate(inbound):
                 for inbound_connection in inbound_connections:
                         if inbound_connection is not None:
@@ -506,21 +521,128 @@ def vignette(traversable_image: Image, clamp: int) -> Image:
         return new_image
 
 
-def blurry_upscale(image: Image) -> Image:
-        pass
+# TODO: Implement BICUBIC for better results
+def bilinear_upscale(image: Image, new_image_size: int) -> Image:
+        new_image = Image(new_image_size)
+        scale_factor = new_image_size / image.size
+
+        for i in range(new_image_size):
+                for j in range(new_image_size):
+                        x = ((i + 0.5) / scale_factor) - 0.5
+                        y = ((j + 0.5) / scale_factor) - 0.5
+
+                        int_x = int(x)
+                        int_y = int(y)
+
+                        x_difference = (x - int_x)
+                        y_difference = (y - int_y)
+
+                        top_left_weight = image[int_x, int_y].weight
+                        top_right_weight = image[constrain(int_x + 1, 0, image.size - 1)[0], int_y].weight
+                        bottom_left_weight = image[int_x, constrain(int_y + 1, 0, image.size - 1)[0]].weight
+                        bottom_right_weight = image[constrain(int_x + 1, 0, image.size - 1)[0], constrain(int_y + 1, 0, image.size - 1)[0]].weight
+
+                        top_weight = top_right_weight * x_difference + top_left_weight * (1 - x_difference)
+                        bottom_weight = bottom_right_weight * x_difference + bottom_left_weight * (1 - x_difference)
+
+                        interpolated_weight = bottom_weight * y_difference + top_weight * (1 - y_difference)
+                        new_image[i, j].weight = interpolated_weight
+
+        return new_image
 
 
-def perform_dla(
-        seed: int,
-        initial_size: int,
-        end_size: int,
-        initial_density_threshold: float,
-        density_falloff_extremity: float,
-        density_falloff_bias: float,
-        use_concurrent_walkers: bool,
-        upscale_factor: float,
-        jitter_range: int,
-) -> List[Image]:
+def gaussian_blur(image: Image, kernel_size: int) -> Image:
+        # We need to perform gaussian blurs on the image using convolutions
+        # A convolution is a mathematical operation that may be performed on
+        # two multidimensional data, similar to multiplication and addition
+        # In the context of 1D data such as arrays, convolutions can be
+        # described as reversing the second array, offsetting it by some value,
+        # and summing the multiplication of overlapping terms
+        #
+        # a1: [1, 2, 3, 4, 5 ]
+        # a2: [6, 7, 8, 9, 10]
+        #
+        # Reverse the second array and offset it
+        # a1:          [ 1, 2, 3, 4, 5]
+        # a2: [10, 9, 8, 7, 6]
+        # Now, sum the product of overlapping terms
+        # Result for shown step of the convolution: 1*7 + 2*6
+        #
+        # The FFT (Fast Fourier Transform) algorithm can efficiently convert
+        # between coefficient and value representations of polynomial functions
+
+        new_image = Image(image.size)
+
+        # Get the gaussian filter kernel for convolution
+        def create_kernel(size, standard_deviation):
+                gaussian_filter = [[0 for _ in range(size)] for _ in range(size)]
+
+                center = size // 2
+                constant_term = 1 / (2 * math.pi * standard_deviation ** 2)
+
+                total = 0
+                for i in range(size):
+                        for j in range(size):
+                                x = i - center
+                                y = j - center
+                                gaussian_filter[i][j] = constant_term * math.e ** -((x**2 + y**2) / (2 * standard_deviation ** 2))
+                                total += gaussian_filter[i][j]
+
+                for i in range(size):
+                        for j in range(size):
+                                gaussian_filter[i][j] /= total
+
+                return gaussian_filter
+
+        kernel = create_kernel(kernel_size,  1)
+
+        # Perform convolution using FFT
+        def pad_input(p):
+                next_pow2 = 2 ** math.ceil(math.log2(len(p)))
+                return p + [0] * (next_pow2 - len(p))
+
+        def FFT(p):
+                n = len(p)
+                if n <= 1:
+                        return p
+                omega = math.e ** ((2j * math.pi) / n)
+                pe, po = p[::2], p[1::2]
+                ye = FFT(pe)
+                yo = FFT(po)
+                y = [0] * n
+                for j in range(n // 2):
+                        y[j] = (ye[j] + omega**j * yo[j])
+                        y[j + n // 2] = ye[j] - (omega**j * yo[j])
+                return y
+
+        def IFFT(p):
+                n = len(p)
+                if n <= 1:
+                        return p
+                omega = math.e ** ((-2j * math.pi) / n)
+                pe, po = p[::2], p[1::2]
+                ye = IFFT(pe)
+                yo = IFFT(po)
+                y = [0] * n
+                for j in range(n // 2):
+                        y[j] = ye[j] + (omega ** j * yo[j])
+                        y[j + n // 2] = ye[j] - (omega ** j * yo[j])
+                return [a/n for a in y]  # Normalize by n
+
+        
+
+        return new_image
+
+
+def perform_dla(seed: int,
+                initial_size: int,
+                end_size: int,
+                initial_density_threshold: float,
+                density_falloff_extremity: float,
+                density_falloff_bias: float,
+                use_concurrent_walkers: bool,
+                upscale_factor: float,
+                jitter_range: int) -> List[Image]:
         images = []
 
         image = Image(initial_size)
@@ -650,27 +772,24 @@ def display_image(image: Image) -> None:
 def main():
         start_time = time.time()
 
-        images = perform_dla(
-                seed=random.randint(0, 1000),
-                initial_size=50,
-                end_size=1000,
-                initial_density_threshold=0.1,
-                density_falloff_extremity=2,
-                density_falloff_bias=1 / 2,
-                use_concurrent_walkers=True,
-                upscale_factor=2,
-                jitter_range=5,
-        )
+        images = perform_dla(seed=random.randint(0, 1000),
+                             initial_size=50,
+                             end_size=1000,
+                             initial_density_threshold=0.1,
+                             density_falloff_extremity=2,
+                             density_falloff_bias=1 / 2,
+                             use_concurrent_walkers=True,
+                             upscale_factor=2,
+                             jitter_range=5)
 
         end_time = time.time()
         print(f"Image generation time: {end_time - start_time} seconds")
 
         if DEBUG:
-                for image in images:
-                        display_image(vignette(image, 100))
-
-                final_image = images[-1]
-                print(len(find_contiguous_line_segments(final_image)))
+                image = images[0]
+                blurry_image = bilinear_upscale(vignette(image, 300), 500)
+                display_image(blurry_image)
+                # print(len(find_contiguous_line_segments(final_image)))
 
 
 def test():
@@ -708,17 +827,9 @@ def test():
         # image.values[6][6].weight = 30
         # image.values[6][6].struck = image.values[6][5]
 
-        upscaled = crisp_upscale(image, 100)
-        upscaled.origin.weight = 1000
-
-        line_segments = find_contiguous_line_segments(upscaled)
-        print(line_segments)
-        print(upscaled.origin)
-        print(traversable(upscaled))
-
-        display_image(image)
-        display_image(upscaled)
+        blurred_image = gaussian_blur(image, image.size // 2)
+        display_image(blurred_image)
 
 
 if __name__ == "__main__":
-        main()
+        test()
