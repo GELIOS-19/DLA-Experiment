@@ -333,8 +333,8 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
         # Delete the extra segment number in the starts_at and ends_at fields
         for key in mappings.keys():
                 if len(mappings[key]["starts_at"]) == 3 and len(mappings[key]["ends_at"]) == 3:
-                        del mappings[key]["starts_at"][2]
-                        del mappings[key]["ends_at"][2]
+                        mappings[key]["starts_at"].pop(2)
+                        mappings[key]["ends_at"].pop(2)
 
         return dict(mappings)
 
