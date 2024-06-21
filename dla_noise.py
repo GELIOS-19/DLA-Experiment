@@ -4,10 +4,10 @@ from typing import List, Self, Tuple, Any, Optional, Dict
 import random
 import time
 from collections import deque, defaultdict
-import math
+import math  # Operations on complex numbers are supported in native python, but we must find a library for this in java
 import cmath
 
-import numpy as np
+import numpy as np  # Get rid of numpy
 from numpy import ndarray, dtype
 import matplotlib.pyplot as plt
 """
