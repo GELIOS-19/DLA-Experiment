@@ -78,17 +78,19 @@ Steps:
                         weighted average of the adjacent pixels.
 """
 
+# TODO: Rewrite with a class based approach
+
 DEBUG = True
 
 GLOBAL_DIRECTIONS = (
-        (-1, -1),  # North West
-        (0, -1),  # North
-        (1, -1),  # North East
-        (1, 0),  # East
-        (1, 1),  # South East
-        (0, 1),  # South
-        (-1, 1),  # South West
-        (-1, 0),  # West
+                (-1, -1),  # North West
+                (0, -1),  # North
+                (1, -1),  # North East
+                (1, 0),  # East
+                (1, 1),  # South East
+                (0, 1),  # South
+                (-1, 1),  # South West
+                (-1, 0),  # West
 )
 
 
@@ -125,7 +127,7 @@ class Image:
         size: int
         density: float
         values: List[List[Pixel]]
-        origin: Pixel | None
+        origin: Optional[Pixel]
 
         def __init__(self, size: int):
                 self.size = size
@@ -170,17 +172,18 @@ def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[
         return max(low, min(high, value)), value == max(low, min(high, value))
 
 
+# TODO: Port this function to pure python
 def bezier_sigmoid(a: int | float, m: int | float, b: int | float, precision=10000) -> ndarray[Any, dtype[Any]] | None:
 
         def bezier_curve(t, P0, P1, P2, P3):
                 return (1 - t)**3 * P0 + 3 * (1 - t)**2 * t * P1 + 3 * (1 - t) * t**2 * P2 + t**3 * P3
 
         def vertical_line_test(bezier_points):
-                x_progression = 0
+                x = 0
                 for point in bezier_points:
-                        if point[0] > x_progression:
-                                x_progression = point[0]
-                        if point[0] < x_progression:
+                        if point[0] > x:
+                                x = point[0]
+                        if point[0] < x:
                                 return False
                 return True
 
@@ -228,18 +231,18 @@ def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], L
                 for y in range(traversable_image.size):
                         pixel = traversable_image.values[x][y]
                         if pixel.frozen and pixel.struck:
-                                index = pixel.struck.x * traversable_image.size + pixel.struck.y
-                                inbound[index].append(x * traversable_image.size + y)
+                                i = pixel.struck.x * traversable_image.size + pixel.struck.y
+                                inbound[i].append(x * traversable_image.size + y)
                         elif not pixel.frozen:
                                 inbound[x * traversable_image.size + y].append(None)
 
         outbound: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
-        for index, inbound_connections in enumerate(inbound):
+        for i, inbound_connections in enumerate(inbound):
                 for inbound_connection in inbound_connections:
                         if inbound_connection is not None:
-                                outbound[inbound_connection].append(index)
+                                outbound[inbound_connection].append(i)
                         else:
-                                outbound[index].append(None)
+                                outbound[i].append(None)
 
         return inbound, outbound
 
@@ -360,10 +363,10 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         #       follows the edges of this geometry. This edges tuple can be generated
         #       dependent on the geometry
         edges = (
-                ((0, image.size - 1), (0, 0)),  # Top
-                ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
-                ((image.size - 1, image.size - 1), (0, image.size - 1)),  # Right
-                ((0, 0), (0, image.size - 1)),  # Left
+                        ((0, image.size - 1), (0, 0)),  # Top
+                        ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
+                        ((image.size - 1, image.size - 1), (0, image.size - 1)),  # Right
+                        ((0, 0), (0, image.size - 1)),  # Left
         )
 
         # Create a list of walkers
@@ -390,9 +393,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                         x, _ = constrain(path[-1][0] + direction[0], 0, image.size - 1)
                         y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
-                        # Once we find the coordinates of a frozen pixel, we
-                        # will freeze the previous pixel along the path of the
-                        # random walk
+                        # Once we find the coordinates of a frozen pixel, we will freeze the previous pixel along the path of the random walk
                         if image.values[x][y].frozen:
                                 prev_x = path[-1][0]
                                 prev_y = path[-1][1]
@@ -466,8 +467,7 @@ def jitter(traversable_image: Image) -> Image:
 def vignette(traversable_image: Image, clamp: int) -> Image:
         new_image = Image(traversable_image.size)
 
-        # Set the origin of the new traversable_image to the same as it was in
-        # the input
+        # Set the origin of the new traversable_image to the same as it was in the input
         new_image.origin = new_image.values[traversable_image.origin.x][traversable_image.origin.y]
 
         inbound, _ = get_connections(traversable_image)
@@ -495,8 +495,7 @@ def vignette(traversable_image: Image, clamp: int) -> Image:
         # Use the downstream count of each pixel to calculate its brightness
         downstream_counts = [0 for _ in range(traversable_image.size**2)]
 
-        # Start at the origin of the traversable_image and use BFS to explore
-        # the graph
+        # Start at the origin of the traversable_image and use BFS to explore the graph
         origin = (traversable_image.origin.x, traversable_image.origin.y)
 
         visited = [origin]
@@ -514,8 +513,7 @@ def vignette(traversable_image: Image, clamp: int) -> Image:
                                 visited.append(next_node)
                                 queue.append(next_node)
 
-        # Using the downstream_counts list, we can redraw the traversable_image
-        # where the weight is the downstream count of each pixel
+        # Using the downstream_counts list, we can redraw the traversable_image where the weight is the downstream count of each pixel
         for pixel_index, downstream_count in enumerate(downstream_counts):
                 if downstream_count == 0:
                         continue
@@ -574,9 +572,9 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
         def cubic(x):
                 abs_x = abs(x)
                 if abs_x <= 1:
-                        return 1 - 2 * abs_x ** 2 + abs_x ** 3
+                        return 1 - 2 * abs_x**2 + abs_x**3
                 elif 1 < abs_x < 2:
-                        return 4 - 8 * abs_x + 5 * abs_x ** 2 - abs_x ** 3
+                        return 4 - 8 * abs_x + 5 * abs_x**2 - abs_x**3
                 else:
                         return 0
 
@@ -644,14 +642,14 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
                 gaussian_filter = [[0] * size for _ in range(size)]
 
                 center = size // 2
-                c = 1 / (2 * math.pi * sigma ** 2)
+                c = 1 / (2 * math.pi * sigma**2)
 
                 total = 0
                 for i in range(size):
                         for j in range(size):
                                 x = i - center
                                 y = j - center
-                                gaussian_filter[i][j] = c * math.e ** -((x**2 + y**2) / (2 * sigma ** 2))
+                                gaussian_filter[i][j] = c * math.e**-((x**2 + y**2) / (2 * sigma**2))
                                 total += gaussian_filter[i][j]
 
                 for i in range(size):
@@ -664,31 +662,43 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         kernel = create_kernel(kernel_base_size if kernel_base_size % 2 == 1 else kernel_base_size + 1, standard_deviation)
 
         # Perform convolution using FFT
-        def zero_pad(*ms):
-                if not ms:
-                        return []
+        def pad(m, size):
+                if not m:
+                        return [[0] * size for _ in range(size)]
 
-                def nearest_power_of_two(n):
-                        return 1 << (n - 1).bit_length()
+                # Get the current dimensions of the array
+                rows = len(m)
+                cols = len(m[0])
 
-                max_rows = max(len(m) for m in ms)
-                max_cols = max(max(len(row) for row in m) for m in ms)
+                # Calculate the starting indices to center the original array
+                start_row = (size - rows) // 2
+                start_col = (size - cols) // 2
 
-                target_rows = nearest_power_of_two(max_rows)
-                target_cols = nearest_power_of_two(max_cols)
+                # Create a new array of the desired size filled with zeros
+                padded_array = [[0] * size for _ in range(size)]
 
-                def pad_matrix(matrix):
-                        padded = []
-                        for row in matrix:
-                                padded.append([0] * (target_cols - len(row)) + row)
-                        while len(padded) < target_rows:
-                                padded.insert(0, [0] * target_cols)
-                        return padded
+                # Copy the original array into the new array centered
+                for i in range(rows):
+                        for j in range(cols):
+                                padded_array[start_row + i][start_col + j] = m[i][j]
 
-                return [pad_matrix(matrix) for matrix in ms]
+                return padded_array
 
-        def crop(m, size):
-                return [row[size:len(m)] for row in m[size:len(m)]]
+        def crop(m, original_rows, original_cols):
+                # Get the current dimensions of the padded array
+                size = len(m)
+
+                # Calculate the starting indices to get the original array
+                start_row = (size - original_rows) // 2
+                start_col = (size - original_cols) // 2
+
+                # Extract the original array
+                cropped_array = [m[start_row + i][start_col:start_col + original_cols] for i in range(original_rows)]
+
+                return cropped_array
+
+        def nearest_power_of_two(n):
+                return 1 << (n - 1).bit_length()
 
         def FFT(p):
                 N = len(p)
@@ -723,8 +733,27 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         def complex_mult(a, b):
                 return [[a[i][j] * b[i][j] for j in range(len(a[0]))] for i in range(len(a))]
 
+        def FFT_shift(arr):
+                rows = len(arr)
+                cols = len(arr[0])
+                mid_row = rows // 2
+                mid_col = cols // 2
+
+                # Create a new array with the same size
+                shifted_arr = [[0] * cols for _ in range(rows)]
+
+                for i in range(rows):
+                        for j in range(cols):
+                                new_i = (i + mid_row) % rows
+                                new_j = (j + mid_col) % cols
+                                shifted_arr[new_i][new_j] = arr[i][j]
+
+                return shifted_arr
+
         # Pad the image weights and the kernel
-        padded_weights, padded_kernel = zero_pad(image.weights, kernel)
+        pad_to_size = nearest_power_of_two(max(len(image.weights), len(kernel)))
+        padded_weights = pad(image.weights, pad_to_size)
+        padded_kernel = FFT_shift(pad(kernel, pad_to_size))  # We must account for the shift of the 0-frequency element in the padded kernel
 
         # Apply FFT2 to the weights and the kernel to convert them to frequency domain
         FFT_weights = FFT2(padded_weights)
@@ -737,7 +766,7 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         convolved_image = IFFT2(FFT_product)
 
         # Crop image to original size
-        blurred_weights = crop(convolved_image, len(convolved_image) - new_image.size)
+        blurred_weights = crop(convolved_image, image.size, image.size)
 
         # Transfer blurred_weights to new image
         for i in range(new_image.size):
@@ -747,15 +776,7 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         return new_image
 
 
-def perform_dla(seed: int,
-                initial_size: int,
-                end_size: int,
-                initial_density_threshold: float,
-                density_falloff_extremity: float,
-                density_falloff_bias: float,
-                use_concurrent_walkers: bool,
-                upscale_factor: float,
-                jitter_range: int) -> List[Image]:
+def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int) -> List[Image]:
         images = []
 
         image = Image(initial_size)
@@ -764,8 +785,7 @@ def perform_dla(seed: int,
         random.seed(seed)
 
         # Calculate the number of steps needed to reach end_size
-        # Each iteration must progressively add less density in order for the
-        # algorithm to remain efficient
+        # Each iteration must progressively add less density in order for the algorithm to remain efficient
         steps = 0
         current_size = initial_size
         while current_size < end_size:
@@ -800,8 +820,7 @@ def perform_dla(seed: int,
 
                 # Simulate random walks
                 while image.density < step_density_threshold:
-                        # The number of concurrent walkers is calculated based
-                        # on density estimation
+                        # The number of concurrent walkers is calculated based on density estimation
                         num_concurrent_walkers: int
                         if use_concurrent_walkers:
                                 total_pixels = image.size**2
@@ -818,8 +837,7 @@ def perform_dla(seed: int,
                 # Add traversable_image to images
                 images.append(copy.copy(image))
 
-                # Upscale the traversable_image once step_density_threshold is
-                # met
+                # Upscale the traversable_image once step_density_threshold is met
                 image = crisp_upscale(image, int(image.size * upscale_factor))
 
         return images
@@ -885,15 +903,7 @@ def display_image(image: Image) -> None:
 def main():
         start_time = time.time()
 
-        images = perform_dla(seed=random.randint(0, 1000),
-                             initial_size=50,
-                             end_size=1000,
-                             initial_density_threshold=0.1,
-                             density_falloff_extremity=2,
-                             density_falloff_bias=1 / 2,
-                             use_concurrent_walkers=True,
-                             upscale_factor=2,
-                             jitter_range=5)
+        images = perform_dla(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=5)
 
         end_time = time.time()
         print(f"Image generation time: {end_time - start_time} seconds")
@@ -944,9 +954,9 @@ def test():
         # display_image(blurred_image)
 
         display_image(image)
-        upscaled = bilinear_upscale(image, 300)
+        upscaled = bicubic_upscale(image, 300)
         display_image(upscaled)
-        display_image(gaussian_blur(upscaled, 3))
+        display_image(gaussian_blur(upscaled, 10))
 
 
 if __name__ == "__main__":
