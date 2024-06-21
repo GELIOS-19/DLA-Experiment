@@ -677,9 +677,9 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
                 target_rows = nearest_power_of_two(max_rows)
                 target_cols = nearest_power_of_two(max_cols)
 
-                def pad_matrix(m):
+                def pad_matrix(matrix):
                         padded = []
-                        for row in m:
+                        for row in matrix:
                                 padded.append([0] * (target_cols - len(row)) + row)
                         while len(padded) < target_rows:
                                 padded.insert(0, [0] * target_cols)
@@ -900,7 +900,7 @@ def main():
 
         if DEBUG:
                 image = images[0]
-                blurry_image = bicubic_upscale(vignette(image, 300), 500)
+                blurry_image = gaussian_blur(bicubic_upscale(vignette(image, 300), 500), 10)
                 display_image(blurry_image)
                 # print(len(find_contiguous_line_segments(final_image)))
 
