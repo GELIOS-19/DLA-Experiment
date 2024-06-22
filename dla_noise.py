@@ -45,7 +45,7 @@ Steps:
         Upscaling:
                 There are two types of Image upscaling used in this algorithm: A
                 crisp upscale and a blurry upscale.
-                
+
                 5. When we perform an upscale on the Image, we need to perform 
                         both a crisp upscale and a blurry upscale.
                 6. Taking the Image with the crisp upscale, we continue to add
@@ -395,10 +395,10 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
 
                         # Once we find the coordinates of a frozen pixel, we will freeze the previous pixel along the path of the random walk
                         if image.values[x][y].frozen:
-                                prev_x = path[-1][0]
-                                prev_y = path[-1][1]
+                                previous_x = path[-1][0]
+                                previous_y = path[-1][1]
 
-                                pixel = image.values[prev_x][prev_y]
+                                pixel = image.values[previous_x][previous_y]
                                 pixel.struck = image.values[x][y]
                                 pixel.frozen = True
                                 pixel.weight = 100
@@ -429,14 +429,14 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
         _, outbound = get_connections(traversable_image)
         for connections_index, connections in enumerate(outbound):
                 if None not in connections:
-                        x0 = int((connections_index // traversable_image.size) * scale_factor)
-                        y0 = int((connections_index % traversable_image.size) * scale_factor)
+                        initial_x = int((connections_index // traversable_image.size) * scale_factor)
+                        initial_y = int((connections_index % traversable_image.size) * scale_factor)
 
                         for connection in connections:
-                                x1 = int((connection // traversable_image.size) * scale_factor)
-                                y1 = int((connection % traversable_image.size) * scale_factor)
+                                final_x = int((connection // traversable_image.size) * scale_factor)
+                                final_y = int((connection % traversable_image.size) * scale_factor)
 
-                                line_points = draw_bresenham(x0, y0, x1, y1)
+                                line_points = draw_bresenham(initial_x, initial_y, final_x, final_y)
                                 for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
                                         line_pixel = new_image.values[line_point_x][line_point_y]
                                         line_pixel.weight = 100 + 20 * line_point_index
@@ -546,18 +546,18 @@ def bilinear_upscale(image: Image, new_image_size: int) -> Image:
                         x_floor = int(x)
                         y_floor = int(y)
 
-                        x_diff = (x - x_floor)
-                        y_diff = (y - y_floor)
+                        x_difference = (x - x_floor)
+                        y_difference = (y - y_floor)
 
                         top_left_weight = image[x_floor, y_floor].weight
                         top_right_weight = image[constrain(x_floor + 1, 0, image.size - 1)[0], y_floor].weight
                         bottom_left_weight = image[x_floor, constrain(y_floor + 1, 0, image.size - 1)[0]].weight
                         bottom_right_weight = image[constrain(x_floor + 1, 0, image.size - 1)[0], constrain(y_floor + 1, 0, image.size - 1)[0]].weight
 
-                        top_weight = top_right_weight * x_diff + top_left_weight * (1 - x_diff)
-                        bottom_weight = bottom_right_weight * x_diff + bottom_left_weight * (1 - x_diff)
+                        top_weight = top_right_weight * x_difference + top_left_weight * (1 - x_difference)
+                        bottom_weight = bottom_right_weight * x_difference + bottom_left_weight * (1 - x_difference)
 
-                        interpolated_weight = bottom_weight * y_diff + top_weight * (1 - y_diff)
+                        interpolated_weight = bottom_weight * y_difference + top_weight * (1 - y_difference)
                         new_image[i, j].weight = interpolated_weight
 
         return new_image
@@ -582,8 +582,8 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
         def get_interpolated_value(x, y):
                 x_floor = int(x)
                 y_floor = int(y)
-                x_diff = x - x_floor
-                y_diff = y - y_floor
+                x_difference = x - x_floor
+                y_difference = y - y_floor
 
                 result = 0
                 for m in range(-1, 3):
@@ -591,16 +591,16 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
                                 x_index = int(constrain(x_floor + m, 0, image.size - 1)[0])
                                 y_index = int(constrain(y_floor + n, 0, image.size - 1)[0])
                                 weight = image[x_index, y_index].weight
-                                result += weight * cubic(m - x_diff) * cubic(n - y_diff)
+                                result += weight * cubic(m - x_difference) * cubic(n - y_difference)
 
                 return max(0, result)
 
         # Apply interpolation across the new image
         for i in range(new_image_size):
                 for j in range(new_image_size):
-                        x_orig = (i + 0.5) / scale_factor - 0.5
-                        y_orig = (j + 0.5) / scale_factor - 0.5
-                        interpolated_weight = get_interpolated_value(x_orig, y_orig)
+                        original_x = (i + 0.5) / scale_factor - 0.5
+                        original_y = (j + 0.5) / scale_factor - 0.5
+                        interpolated_weight = get_interpolated_value(original_x, original_y)
                         new_image[i, j].weight = interpolated_weight
 
         return new_image
