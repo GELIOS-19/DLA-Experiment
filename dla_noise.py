@@ -168,7 +168,7 @@ class Image:
                 def is_in_bounds(x, y):
                         return 0 <= x < self.size and 0 <= y < self.size
 
-                def bfs(start_pixel: Pixel, target_pixel: Pixel):
+                def breadth_first_search(start_pixel: Pixel, target_pixel: Pixel):
                         queue = [start_pixel]
                         visited = set()
                         visited.add((start_pixel.x, start_pixel.y))
@@ -198,7 +198,7 @@ class Image:
                 # Check if all frozen pixels can reach the origin
                 origin_pixel = self.origin
                 for x, y in frozen_pixels:
-                        if not bfs(self.grid[x][y], origin_pixel):
+                        if not breadth_first_search(self.grid[x][y], origin_pixel):
                                 return False
 
                 return True
@@ -261,29 +261,29 @@ def calculate_density(image: Image) -> float:
 
 
 # TODO: Optimize this function
-def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], List[List[int | None]]]:
-        inbound: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
+def build_graph_adjacency_lists(traversable_image: Image) -> Tuple[List[List[Optional[int]]], List[List[Optional[int]]]]:
+        inbound_edges: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
         for x in range(traversable_image.size):
                 for y in range(traversable_image.size):
                         pixel = traversable_image.grid[x][y]
                         if pixel.frozen and pixel.struck:
                                 i = pixel.struck.x * traversable_image.size + pixel.struck.y
-                                inbound[i].append(x * traversable_image.size + y)
+                                inbound_edges[i].append(x * traversable_image.size + y)
                         elif not pixel.frozen:
-                                inbound[x * traversable_image.size + y].append(None)
+                                inbound_edges[x * traversable_image.size + y].append(None)
 
-        outbound: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
-        for i, inbound_connections in enumerate(inbound):
+        outbound_edges: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
+        for i, inbound_connections in enumerate(inbound_edges):
                 for inbound_connection in inbound_connections:
                         if inbound_connection is not None:
-                                outbound[inbound_connection].append(i)
+                                outbound_edges[inbound_connection].append(i)
                         else:
-                                outbound[i].append(None)
+                                outbound_edges[i].append(None)
 
-        return inbound, outbound
+        return inbound_edges, outbound_edges
 
 
-def draw_bresenham(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
+def draw_bresenham_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
         difference_x = abs(final_x - initial_x)
         difference_y = abs(final_y - initial_y)
         step_x = 1 if initial_x < final_x else -1
@@ -318,7 +318,7 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
         # The line_segments list should contain pairs of the endpoints of each
         # line segment found
         origin = [traversable_image.origin.x, traversable_image.origin.y, 0]
-        inbound, _ = get_connections(traversable_image)
+        inbound, _ = build_graph_adjacency_lists(traversable_image)
 
         visited = []
         stack = deque()
@@ -462,7 +462,7 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
                                 core_pixel.weight = 200
 
         # Reconstruct outbound connections
-        _, outbound = get_connections(traversable_image)
+        _, outbound = build_graph_adjacency_lists(traversable_image)
         for connections_index, connections in enumerate(outbound):
                 if None not in connections:
                         initial_x = int((connections_index // traversable_image.size) * scale_factor)
@@ -472,7 +472,7 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
                                 final_x = int((connection // traversable_image.size) * scale_factor)
                                 final_y = int((connection % traversable_image.size) * scale_factor)
 
-                                line_points = draw_bresenham(initial_x, initial_y, final_x, final_y)
+                                line_points = draw_bresenham_line(initial_x, initial_y, final_x, final_y)
                                 for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
                                         line_pixel = new_image.grid[line_point_x][line_point_y]
                                         line_pixel.weight = 100 + 20 * line_point_index
@@ -494,19 +494,19 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
         return new_image
 
 
-def jitter(traversable_image: Image) -> Image:
+def jitter_contiguous_lines(traversable_image: Image) -> Image:
         # TODO: 2 things to experiment with:
         #       - Using bezier curves to jitter line segments
         pass
 
 
-def vignette(traversable_image: Image, clamp: int) -> Image:
+def apply_downstream_height(traversable_image: Image, clamp: int) -> Image:
         new_image = Image(traversable_image.size)
 
         # Set the origin of the new traversable_image to the same as it was in the input
         new_image.origin = new_image.grid[traversable_image.origin.x][traversable_image.origin.y]
 
-        inbound, _ = get_connections(traversable_image)
+        inbound, _ = build_graph_adjacency_lists(traversable_image)
 
         def get_downstream_count(index: int) -> int:
                 # Get the maximum number of downstream pixels for any pixel
@@ -606,11 +606,11 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
 
         # Cubic interpolation function
         def cubic(x):
-                abs_x = abs(x)
-                if abs_x <= 1:
-                        return 1 - 2 * abs_x**2 + abs_x**3
-                elif 1 < abs_x < 2:
-                        return 4 - 8 * abs_x + 5 * abs_x**2 - abs_x**3
+                absolute_x = abs(x)
+                if absolute_x <= 1:
+                        return 1 - 2 * absolute_x**2 + absolute_x**3
+                elif 1 < absolute_x < 2:
+                        return 4 - 8 * absolute_x + 5 * absolute_x**2 - absolute_x**3
                 else:
                         return 0
 
@@ -659,15 +659,15 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         # Now, sum the product of overlapping terms
         # Result for shown step of the convolution: 1*7 + 2*6
         #
-        # The FFT (Fast Fourier Transform) algorithm can efficiently convert
+        # The fast_fourier_transform (Fast Fourier Transform) algorithm can efficiently convert
         # between coefficient and value representations of polynomial functions
-        # FFT is additionally used to convert a function from spatial domain to
+        # fast_fourier_transform is additionally used to convert a function from spatial domain to
         # frequency domain
         # By converting a m of the image weights and the convolution kernel
         # into frequency domain, we effectively create two polynomials
         # Multiplying these polynomials will result in the convolution of the
         # kernel over the image weights
-        # By using IFFT, we can convert the product polynomial from frequency
+        # By using inverse_fast_fourier_transform, we can convert the product polynomial from frequency
         # domain back into spatial domain, returning the weights of the blurred
         # image
 
@@ -697,109 +697,109 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         kernel_base_size = round(6 * standard_deviation)
         kernel = create_kernel(kernel_base_size if kernel_base_size % 2 == 1 else kernel_base_size + 1, standard_deviation)
 
-        # Perform convolution using FFT
-        def pad(m, size):
-                if not m:
-                        return [[0] * size for _ in range(size)]
+        # Perform convolution using fast_fourier_transform
+        def pad(matrix, pada_to_size):
+                if not matrix:
+                        return [[0] * pada_to_size for _ in range(pada_to_size)]
 
                 # Get the current dimensions of the array
-                rows = len(m)
-                cols = len(m[0])
+                rows = len(matrix)
+                column = len(matrix[0])
 
                 # Calculate the starting indices to center the original array
-                start_row = (size - rows) // 2
-                start_col = (size - cols) // 2
+                start_row = (pada_to_size - rows) // 2
+                start_column = (pada_to_size - column) // 2
 
                 # Create a new array of the desired size filled with zeros
-                padded_array = [[0] * size for _ in range(size)]
+                padded_array = [[0] * pada_to_size for _ in range(pada_to_size)]
 
                 # Copy the original array into the new array centered
                 for i in range(rows):
-                        for j in range(cols):
-                                padded_array[start_row + i][start_col + j] = m[i][j]
+                        for j in range(column):
+                                padded_array[start_row + i][start_column + j] = matrix[i][j]
 
                 return padded_array
 
-        def crop(m, original_rows, original_cols):
+        def crop(matrix, original_rows, original_columns):
                 # Get the current dimensions of the padded array
-                size = len(m)
+                size = len(matrix)
 
                 # Calculate the starting indices to get the original array
                 start_row = (size - original_rows) // 2
-                start_col = (size - original_cols) // 2
+                start_column = (size - original_columns) // 2
 
                 # Extract the original array
-                cropped_array = [m[start_row + i][start_col:start_col + original_cols] for i in range(original_rows)]
+                cropped_array = [matrix[start_row + i][start_column:start_column + original_columns] for i in range(original_rows)]
 
                 return cropped_array
 
         def nearest_power_of_two(n):
                 return 1 << (n - 1).bit_length()
 
-        def FFT(p):
-                N = len(p)
-                if N <= 1:
-                        return p
-                even = FFT(p[0::2])
-                odd = FFT(p[1::2])
-                T = [cmath.exp(-2j * cmath.pi * k / N) * odd[k % len(odd)] for k in range(N // 2)]
-                return [even[k] + T[k] for k in range(N // 2)] + [even[k] - T[k] for k in range(N // 2)]
+        def fast_fourier_transform(polynomial_coefficients):
+                polynomial_length = len(polynomial_coefficients)
+                if polynomial_length <= 1:
+                        return polynomial_coefficients
+                even_degrees = fast_fourier_transform(polynomial_coefficients[0::2])
+                odd_degrees = fast_fourier_transform(polynomial_coefficients[1::2])
+                twiddle_factors = [cmath.exp(-2j * cmath.pi * k / polynomial_length) * odd_degrees[k % len(odd_degrees)] for k in range(polynomial_length // 2)]
+                return [even_degrees[k] + twiddle_factors[k] for k in range(polynomial_length // 2)] + [even_degrees[k] - twiddle_factors[k] for k in range(polynomial_length // 2)]
 
-        def IFFT(y):
-                N = len(y)
-                if N <= 1:
-                        return y
-                even = IFFT(y[0::2])
-                odd = IFFT(y[1::2])
-                T = [cmath.exp(2j * cmath.pi * k / N) * odd[k % len(odd)] for k in range(N // 2)]
-                return [(even[k] + T[k]) / 2 for k in range(N // 2)] + [(even[k] - T[k]) / 2 for k in range(N // 2)]
+        def inverse_fast_fourier_transform(polynomial_values):
+                polynomial_length = len(polynomial_values)
+                if polynomial_length <= 1:
+                        return polynomial_values
+                even_degrees = inverse_fast_fourier_transform(polynomial_values[0::2])
+                odd_degrees = inverse_fast_fourier_transform(polynomial_values[1::2])
+                twiddle_factors = [cmath.exp(2j * cmath.pi * k / polynomial_length) * odd_degrees[k % len(odd_degrees)] for k in range(polynomial_length // 2)]
+                return [(even_degrees[k] + twiddle_factors[k]) / 2 for k in range(polynomial_length // 2)] + [(even_degrees[k] - twiddle_factors[k]) / 2 for k in range(polynomial_length // 2)]
 
-        def FFT2(m):
-                FFT_rows = [FFT(row) for row in m]
-                transpose = list(zip(*FFT_rows))
-                FFT_cols = [FFT(col) for col in transpose]
-                return list(col for col in zip(*FFT_cols))
+        def fast_fourier_transform_2d(matrix):
+                fast_fourier_transform_rows = [fast_fourier_transform(row) for row in matrix]
+                transpose = list(zip(*fast_fourier_transform_rows))
+                fast_fourier_transform_columns = [fast_fourier_transform(column) for column in transpose]
+                return list(column for column in zip(*fast_fourier_transform_columns))
 
-        def IFFT2(m):
-                IFFT_rows = [IFFT(row) for row in m]
-                transpose = list(zip(*IFFT_rows))
-                IFFT_cols = [IFFT(col) for col in transpose]
-                return list(zip(*IFFT_cols))
+        def inverse_fast_fourier_transform_2d(matrix):
+                inverse_fast_fourier_transform_rows = [inverse_fast_fourier_transform(row) for row in matrix]
+                transpose = list(zip(*inverse_fast_fourier_transform_rows))
+                inverse_fast_fourier_transform_columns = [inverse_fast_fourier_transform(column) for column in transpose]
+                return list(zip(*inverse_fast_fourier_transform_columns))
 
-        def complex_mult(a, b):
+        def complex_multiplication(a, b):
                 return [[a[i][j] * b[i][j] for j in range(len(a[0]))] for i in range(len(a))]
 
-        def FFT_shift(arr):
-                rows = len(arr)
-                cols = len(arr[0])
-                mid_row = rows // 2
-                mid_col = cols // 2
+        def fast_fourier_transform_shift(array):
+                rows = len(array)
+                columns = len(array[0])
+                middle_row = rows // 2
+                middle_column = columns // 2
 
                 # Create a new array with the same size
-                shifted_arr = [[0] * cols for _ in range(rows)]
+                shifted_array = [[0] * columns for _ in range(rows)]
 
                 for i in range(rows):
-                        for j in range(cols):
-                                new_i = (i + mid_row) % rows
-                                new_j = (j + mid_col) % cols
-                                shifted_arr[new_i][new_j] = arr[i][j]
+                        for j in range(columns):
+                                new_i = (i + middle_row) % rows
+                                new_j = (j + middle_column) % columns
+                                shifted_array[new_i][new_j] = array[i][j]
 
-                return shifted_arr
+                return shifted_array
 
         # Pad the image weights and the kernel
         pad_to_size = nearest_power_of_two(max(len(image.weights), len(kernel)))
         padded_weights = pad(image.weights, pad_to_size)
-        padded_kernel = FFT_shift(pad(kernel, pad_to_size))  # We must account for the shift of the 0-frequency element in the padded kernel
+        padded_kernel = fast_fourier_transform_shift(pad(kernel, pad_to_size))  # We must account for the shift of the 0-frequency element in the padded kernel
 
-        # Apply FFT2 to the weights and the kernel to convert them to frequency domain
-        FFT_weights = FFT2(padded_weights)
-        FFT_kernel = FFT2(padded_kernel)
+        # Apply fast_fourier_transform_2d to the weights and the kernel to convert them to frequency domain
+        FFT_weights = fast_fourier_transform_2d(padded_weights)
+        FFT_kernel = fast_fourier_transform_2d(padded_kernel)
 
         # Calculate the product
-        FFT_product = complex_mult(FFT_weights, FFT_kernel)
+        FFT_product = complex_multiplication(FFT_weights, FFT_kernel)
 
-        # Use IFFT2 to convert the product back into spatial domain
-        convolved_image = IFFT2(FFT_product)
+        # Use inverse_fast_fourier_transform_2d to convert the product back into spatial domain
+        convolved_image = inverse_fast_fourier_transform_2d(FFT_product)
 
         # Crop image to original size
         blurred_weights = crop(convolved_image, image.size, image.size)
@@ -812,7 +812,7 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         return new_image
 
 
-def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int) -> List[Image]:
+def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int) -> List[Image]:
         images = []
 
         image = Image(initial_size)
@@ -898,16 +898,15 @@ def display_image(image: Image) -> None:
 def main():
         start_time = time.time()
 
-        images = perform_dla(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=5)
+        images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=5)
 
         end_time = time.time()
         print(f"Image generation time: {end_time - start_time} seconds")
 
         if DEBUG:
                 image = images[0]
-                blurry_image = gaussian_blur(bicubic_upscale(vignette(image, 300), 500), 10)
+                blurry_image = gaussian_blur(bicubic_upscale(apply_downstream_height(image, 300), 500), 10)
                 display_image(blurry_image)
-                # print(len(find_contiguous_line_segments(final_image)))
 
 
 def test():
