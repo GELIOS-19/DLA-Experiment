@@ -792,14 +792,14 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         padded_kernel = fast_fourier_transform_shift(pad(kernel, pad_to_size))  # We must account for the shift of the 0-frequency element in the padded kernel
 
         # Apply fast_fourier_transform_2d to the weights and the kernel to convert them to frequency domain
-        FFT_weights = fast_fourier_transform_2d(padded_weights)
-        FFT_kernel = fast_fourier_transform_2d(padded_kernel)
+        fast_fourier_transform_weights = fast_fourier_transform_2d(padded_weights)
+        fast_fourier_transform_kernel = fast_fourier_transform_2d(padded_kernel)
 
         # Calculate the product
-        FFT_product = complex_multiplication(FFT_weights, FFT_kernel)
+        fast_fourier_transform_product = complex_multiplication(fast_fourier_transform_weights, fast_fourier_transform_kernel)
 
         # Use inverse_fast_fourier_transform_2d to convert the product back into spatial domain
-        convolved_image = inverse_fast_fourier_transform_2d(FFT_product)
+        convolved_image = inverse_fast_fourier_transform_2d(fast_fourier_transform_product)
 
         # Crop image to original size
         blurred_weights = crop(convolved_image, image.size, image.size)
@@ -857,15 +857,15 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
                 # Simulate random walks
                 while image.density < step_density_threshold:
                         # The number of concurrent walkers is calculated based on density estimation
-                        num_concurrent_walkers: int
+                        number_concurrent_walkers: int
                         if use_concurrent_walkers:
                                 total_pixels = image.size**2
                                 frozen_pixels = image.density * total_pixels
-                                num_concurrent_walkers = max(1, int((step_density_threshold * total_pixels) - frozen_pixels))
+                                number_concurrent_walkers = max(1, int((step_density_threshold * total_pixels) - frozen_pixels))
                         else:
-                                num_concurrent_walkers = 1
+                                number_concurrent_walkers = 1
 
-                        simulate_random_walk(image, num_concurrent_walkers)
+                        simulate_random_walk(image, number_concurrent_walkers)
 
                         # Update traversable_image density
                         image.density = calculate_density(image)
