@@ -126,7 +126,7 @@ class Pixel:
 class Image:
         size: int
         density: float
-        values: List[List[Pixel]]
+        grid: List[List[Pixel]]
         origin: Optional[Pixel]
 
         def __init__(self, size: int):
@@ -134,16 +134,16 @@ class Image:
                 self.density = 0
                 self.origin = None
 
-                self.values = []
+                self.grid = []
                 for x in range(size):
-                        self.values.append([])
+                        self.grid.append([])
                         for y in range(size):
-                                self.values[x].append(Pixel(x, y))
+                                self.grid[x].append(Pixel(x, y))
 
         def __getitem__(self, index):
                 x, y = index
                 if 0 <= x < self.size and 0 <= y < self.size:
-                        return self.values[x][y]
+                        return self.grid[x][y]
                 else:
                         raise IndexError("Pixel index out of range")
 
@@ -157,15 +157,51 @@ class Image:
                 return new_image
 
         @property
-        def traversable(self) -> bool:
-                return True
-
-        @property
         def weights(self) -> List[List[int | float]]:
                 weights = [[]] * self.size
                 for i in range(self.size):
-                        weights[i] = [pixel.weight for pixel in self.values[i]]
+                        weights[i] = [pixel.weight for pixel in self.grid[i]]
                 return weights
+
+        def is_traversable(self) -> bool:
+
+                def is_in_bounds(x, y):
+                        return 0 <= x < self.size and 0 <= y < self.size
+
+                def bfs(start_pixel: Pixel, target_pixel: Pixel):
+                        queue = [start_pixel]
+                        visited = set()
+                        visited.add((start_pixel.x, start_pixel.y))
+
+                        while queue:
+                                current_pixel = queue.pop(0)
+                                if current_pixel == target_pixel:
+                                        return True
+                                for direction in GLOBAL_DIRECTIONS:
+                                        nx, ny = (current_pixel.x + direction[0], current_pixel.y + direction[1])
+                                        if is_in_bounds(nx, ny):
+                                                neighbor = self.grid[nx][ny]
+                                                if neighbor.frozen and (nx, ny) not in visited:
+                                                        visited.add((nx, ny))
+                                                        queue.append(neighbor)
+                        return False
+
+                if not self.origin or not self.origin.frozen:
+                        return False
+
+                # Find all frozen pixels
+                frozen_pixels = [(x, y) for x in range(self.size) for y in range(self.size) if self.grid[x][y].frozen]
+
+                if not frozen_pixels:
+                        return False
+
+                # Check if all frozen pixels can reach the origin
+                origin_pixel = self.origin
+                for x, y in frozen_pixels:
+                        if not bfs(self.grid[x][y], origin_pixel):
+                                return False
+
+                return True
 
 
 def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[int | float, bool]:
@@ -175,8 +211,8 @@ def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[
 # TODO: Port this function to pure python
 def bezier_sigmoid(a: int | float, m: int | float, b: int | float, precision=10000) -> ndarray[Any, dtype[Any]] | None:
 
-        def bezier_curve(t, P0, P1, P2, P3):
-                return (1 - t)**3 * P0 + 3 * (1 - t)**2 * t * P1 + 3 * (1 - t) * t**2 * P2 + t**3 * P3
+        def bezier_curve(time_value, control_point_0, control_point_1, control_point_2, control_point_3):
+                return (1 - time_value)**3 * control_point_0 + 3 * (1 - time_value)**2 * time_value * control_point_1 + 3 * (1 - time_value) * time_value**2 * control_point_2 + time_value**3 * control_point_3
 
         def vertical_line_test(bezier_points):
                 x = 0
@@ -188,23 +224,23 @@ def bezier_sigmoid(a: int | float, m: int | float, b: int | float, precision=100
                 return True
 
         # Define control points
-        P0 = np.array([0.0, 1.0])
-        P3 = np.array([a, 0.0])
+        control_point_0 = np.array([0.0, 1.0])
+        control_point_3 = np.array([a, 0.0])
 
-        c = P0[1] - m * P0[0]
-        x1 = (1 - c) / m
-        x2 = (0 - c) / m
-        midpoint = (x1 + x2) / 2
+        control_line = control_point_0[1] - m * control_point_0[0]
+        initial_line_x = (1 - control_line) / m
+        final_line_x = (0 - control_line) / m
+        midpoint = (initial_line_x + final_line_x) / 2
         offset = b - midpoint
-        x1 += offset
-        x2 += offset
+        initial_line_x += offset
+        final_line_x += offset
 
-        P1 = np.array([x1, 1.0])
-        P2 = np.array([x2, 0.0])
+        control_point_1 = np.array([initial_line_x, 1.0])
+        control_point_2 = np.array([final_line_x, 0.0])
 
         # Find the bezier points
-        t_values = np.linspace(0, 1, precision)
-        bezier_points = np.array([bezier_curve(t, P0, P1, P2, P3) for t in t_values])
+        time_values = np.linspace(0, 1, precision)
+        bezier_points = np.array([bezier_curve(t, control_point_0, control_point_1, control_point_2, control_point_3) for t in time_values])
 
         # Check if curve passes the vertical line test
         is_function = vertical_line_test(bezier_points)
@@ -219,7 +255,7 @@ def smooth_falloff(x: int | float, k: int | float) -> float:
 
 
 def calculate_density(image: Image) -> float:
-        frozen_pixels = sum(pixel.frozen for row in image.values for pixel in row)
+        frozen_pixels = sum(pixel.frozen for row in image.grid for pixel in row)
         total_pixels = image.size**2
         return frozen_pixels / total_pixels
 
@@ -229,7 +265,7 @@ def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], L
         inbound: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
         for x in range(traversable_image.size):
                 for y in range(traversable_image.size):
-                        pixel = traversable_image.values[x][y]
+                        pixel = traversable_image.grid[x][y]
                         if pixel.frozen and pixel.struck:
                                 i = pixel.struck.x * traversable_image.size + pixel.struck.y
                                 inbound[i].append(x * traversable_image.size + y)
@@ -247,26 +283,26 @@ def get_connections(traversable_image: Image) -> Tuple[List[List[int | None]], L
         return inbound, outbound
 
 
-def draw_bresenham(x0: int, y0: int, x1: int, y1: int) -> List[Tuple[int, int]]:
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
+def draw_bresenham(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
+        difference_x = abs(final_x - initial_x)
+        difference_y = abs(final_y - initial_y)
+        step_x = 1 if initial_x < final_x else -1
+        step_y = 1 if initial_y < final_y else -1
+        error = difference_x - difference_y
         line = []
 
         while True:
-                line.append((x0, y0))
+                line.append((initial_x, initial_y))
 
-                if x0 == x1 and y0 == y1:
+                if initial_x == final_x and initial_y == final_y:
                         break
-                e2 = err * 2
-                if e2 > -dy:
-                        err -= dy
-                        x0 += sx
-                if e2 < dx:
-                        err += dx
-                        y0 += sy
+                two_times_error = error * 2
+                if two_times_error > -difference_y:
+                        error -= difference_y
+                        initial_x += step_x
+                if two_times_error < difference_x:
+                        error += difference_x
+                        initial_y += step_y
 
         return line
 
@@ -377,7 +413,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                 edge = random.choice(edges)
                 x = random.randint(edge[0][0], edge[0][1])
                 y = random.randint(edge[1][0], edge[1][1])
-                while image.values[x][y].frozen:
+                while image.grid[x][y].frozen:
                         x = random.randint(0, image.size - 1)
                         y = random.randint(0, image.size - 1)
 
@@ -394,12 +430,12 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                         y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
                         # Once we find the coordinates of a frozen pixel, we will freeze the previous pixel along the path of the random walk
-                        if image.values[x][y].frozen:
+                        if image.grid[x][y].frozen:
                                 previous_x = path[-1][0]
                                 previous_y = path[-1][1]
 
-                                pixel = image.values[previous_x][previous_y]
-                                pixel.struck = image.values[x][y]
+                                pixel = image.grid[previous_x][previous_y]
+                                pixel.struck = image.grid[x][y]
                                 pixel.frozen = True
                                 pixel.weight = 100
                                 walkers.pop(i)
@@ -415,13 +451,13 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
         scale_factor = new_image_size / traversable_image.size
 
         # Preserve the traversable_image origin
-        new_image.origin = new_image.values[int(traversable_image.origin.x * scale_factor)][int(traversable_image.origin.y * scale_factor)]
+        new_image.origin = new_image.grid[int(traversable_image.origin.x * scale_factor)][int(traversable_image.origin.y * scale_factor)]
 
         # Translate pixels from old traversable_image onto new traversable_image
         for x in range(traversable_image.size):
                 for y in range(traversable_image.size):
-                        if traversable_image.values[x][y].frozen:
-                                core_pixel = new_image.values[int(x * scale_factor)][int(y * scale_factor)]
+                        if traversable_image.grid[x][y].frozen:
+                                core_pixel = new_image.grid[int(x * scale_factor)][int(y * scale_factor)]
                                 core_pixel.frozen = True
                                 core_pixel.weight = 200
 
@@ -438,12 +474,12 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
 
                                 line_points = draw_bresenham(initial_x, initial_y, final_x, final_y)
                                 for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
-                                        line_pixel = new_image.values[line_point_x][line_point_y]
+                                        line_pixel = new_image.grid[line_point_x][line_point_y]
                                         line_pixel.weight = 100 + 20 * line_point_index
                                         line_pixel.frozen = True
 
                                         next_point = line_points[line_point_index + 1]
-                                        line_pixel.struck = new_image.values[next_point[0]][next_point[1]]
+                                        line_pixel.struck = new_image.grid[next_point[0]][next_point[1]]
 
         # Calculate new traversable_image density
         new_image.density = calculate_density(new_image)
@@ -451,7 +487,7 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
         if DEBUG:
                 for x in range(new_image_size):
                         for y in range(new_image_size):
-                                pixel = new_image.values[x][y]
+                                pixel = new_image.grid[x][y]
                                 if pixel.struck is not None:
                                         print(f"({pixel.x}, {pixel.y}) -> ({pixel.struck.x}, {pixel.struck.y})")
 
@@ -468,7 +504,7 @@ def vignette(traversable_image: Image, clamp: int) -> Image:
         new_image = Image(traversable_image.size)
 
         # Set the origin of the new traversable_image to the same as it was in the input
-        new_image.origin = new_image.values[traversable_image.origin.x][traversable_image.origin.y]
+        new_image.origin = new_image.grid[traversable_image.origin.x][traversable_image.origin.y]
 
         inbound, _ = get_connections(traversable_image)
 
@@ -520,13 +556,13 @@ def vignette(traversable_image: Image, clamp: int) -> Image:
 
                 x = pixel_index // traversable_image.size
                 y = pixel_index % traversable_image.size
-                pixel = new_image.values[x][y]
+                pixel = new_image.grid[x][y]
 
                 pixel.frozen = True
                 pixel.weight = int(clamp * smooth_falloff(downstream_count, 0.05))
 
-                if traversable_image.values[x][y].struck:
-                        pixel.struck = new_image.values[traversable_image.values[x][y].struck.x][traversable_image.values[x][y].struck.y]
+                if traversable_image.grid[x][y].struck:
+                        pixel.struck = new_image.grid[traversable_image.grid[x][y].struck.x][traversable_image.grid[x][y].struck.y]
 
         new_image.density = calculate_density(new_image)
 
@@ -798,7 +834,7 @@ def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_thr
         curve = bezier_sigmoid(steps, density_falloff_extremity, density_falloff_bias * steps)
 
         # First we must set the central pixel to have maximum weight
-        central_pixel = image.values[image.size // 2][image.size // 2]
+        central_pixel = image.grid[image.size // 2][image.size // 2]
         central_pixel.weight = 255
         central_pixel.frozen = True
 
@@ -843,53 +879,12 @@ def perform_dla(seed: int, initial_size: int, end_size: int, initial_density_thr
         return images
 
 
-def traversable(image: Image) -> bool:
-
-        def is_in_bounds(x, y):
-                return 0 <= x < image.size and 0 <= y < image.size
-
-        def bfs(start_pixel: Pixel, target_pixel: Pixel):
-                queue = [start_pixel]
-                visited = set()
-                visited.add((start_pixel.x, start_pixel.y))
-
-                while queue:
-                        current_pixel = queue.pop(0)
-                        if current_pixel == target_pixel:
-                                return True
-                        for direction in GLOBAL_DIRECTIONS:
-                                nx, ny = (current_pixel.x + direction[0], current_pixel.y + direction[1])
-                                if is_in_bounds(nx, ny):
-                                        neighbor = image.values[nx][ny]
-                                        if neighbor.frozen and (nx, ny) not in visited:
-                                                visited.add((nx, ny))
-                                                queue.append(neighbor)
-                return False
-
-        if not image.origin or not image.origin.frozen:
-                return False
-
-        # Find all frozen pixels
-        frozen_pixels = [(x, y) for x in range(image.size) for y in range(image.size) if image.values[x][y].frozen]
-
-        if not frozen_pixels:
-                return False
-
-        # Check if all frozen pixels can reach the origin
-        origin_pixel = image.origin
-        for x, y in frozen_pixels:
-                if not bfs(image.values[x][y], origin_pixel):
-                        return False
-
-        return True
-
-
 def display_image(image: Image) -> None:
         weights = []
         for x in range(image.size):
                 weights.append([])
                 for y in range(image.size):
-                        weights[x].append(image.values[y][x].weight)
+                        weights[x].append(image.grid[y][x].weight)
         weights = np.array(weights)
 
         plt.imshow(weights, cmap="terrain", origin="lower")
@@ -918,33 +913,33 @@ def main():
 def test():
         image = Image(10)
 
-        image.origin = image.values[5][5]
-        image.values[5][5].frozen = True
-        image.values[5][5].weight = 100
+        image.origin = image.grid[5][5]
+        image.grid[5][5].frozen = True
+        image.grid[5][5].weight = 100
 
-        image.values[6][4].frozen = True
-        image.values[6][4].weight = 50
-        image.values[6][4].struck = image.values[5][5]
+        image.grid[6][4].frozen = True
+        image.grid[6][4].weight = 50
+        image.grid[6][4].struck = image.grid[5][5]
 
         # image.values[5][6].frozen = True
         # image.values[5][6].weight = 50
         # image.values[5][6].struck = image.values[5][5]
 
-        image.values[7][3].frozen = True
-        image.values[7][3].weight = 40
-        image.values[7][3].struck = image.values[6][4]
+        image.grid[7][3].frozen = True
+        image.grid[7][3].weight = 40
+        image.grid[7][3].struck = image.grid[6][4]
 
-        image.values[5][3].frozen = True
-        image.values[5][3].weight = 40
-        image.values[5][3].struck = image.values[6][4]
+        image.grid[5][3].frozen = True
+        image.grid[5][3].weight = 40
+        image.grid[5][3].struck = image.grid[6][4]
 
-        image.values[6][5].frozen = True
-        image.values[6][5].weight = 40
-        image.values[6][5].struck = image.values[6][4]
+        image.grid[6][5].frozen = True
+        image.grid[6][5].weight = 40
+        image.grid[6][5].struck = image.grid[6][4]
 
-        image.values[7][5].frozen = True
-        image.values[7][5].weight = 30
-        image.values[7][5].struck = image.values[6][5]
+        image.grid[7][5].frozen = True
+        image.grid[7][5].weight = 30
+        image.grid[7][5].struck = image.grid[6][5]
 
         # image.values[6][6].frozen = True
         # image.values[6][6].weight = 30
