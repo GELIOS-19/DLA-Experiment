@@ -462,15 +462,15 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
                                 core_pixel.weight = 200
 
         # Reconstruct outbound connections
-        _, outbound = build_graph_adjacency_lists(traversable_image)
-        for connections_index, connections in enumerate(outbound):
-                if None not in connections:
-                        initial_x = int((connections_index // traversable_image.size) * scale_factor)
-                        initial_y = int((connections_index % traversable_image.size) * scale_factor)
+        _, outbound_edges = build_graph_adjacency_lists(traversable_image)
+        for edges_index, edges in enumerate(outbound_edges):
+                if None not in edges:
+                        initial_x = int((edges_index // traversable_image.size) * scale_factor)
+                        initial_y = int((edges_index % traversable_image.size) * scale_factor)
 
-                        for connection in connections:
-                                final_x = int((connection // traversable_image.size) * scale_factor)
-                                final_y = int((connection % traversable_image.size) * scale_factor)
+                        for edge in edges:
+                                final_x = int((edge // traversable_image.size) * scale_factor)
+                                final_y = int((edge % traversable_image.size) * scale_factor)
 
                                 line_points = draw_bresenham_line(initial_x, initial_y, final_x, final_y)
                                 for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
@@ -816,6 +816,7 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         images = []
 
         image = Image(initial_size)
+        image_sum = Image(initial_size)
 
         # Seed the random generator
         random.seed(seed)
@@ -824,7 +825,7 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         # Each iteration must progressively add less density in order for the algorithm to remain efficient
         steps = 0
         current_size = initial_size
-        while current_size < end_size:
+        while current_size * upscale_factor < end_size:
                 current_size *= upscale_factor
                 steps += 1
 
@@ -874,9 +875,11 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
                 images.append(copy.copy(image))
 
                 # Upscale the traversable_image once step_density_threshold is met
+                image_sum += gaussian_blur(apply_downstream_height(image, 300), 3)
+                image_sum = bilinear_upscale(image_sum, int(image_sum.size * upscale_factor))
                 image = crisp_upscale(image, int(image.size * upscale_factor))
 
-        return images
+        return images + [image_sum]
 
 
 def display_image(image: Image) -> None:
@@ -904,9 +907,8 @@ def main():
         print(f"Image generation time: {end_time - start_time} seconds")
 
         if DEBUG:
-                image = images[0]
-                blurry_image = gaussian_blur(bicubic_upscale(apply_downstream_height(image, 300), 500), 10)
-                display_image(blurry_image)
+                final_image = images[-1]
+                display_image(final_image)
 
 
 def test():
@@ -954,4 +956,4 @@ def test():
 
 
 if __name__ == "__main__":
-        test()
+        main()
