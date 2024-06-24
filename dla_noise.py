@@ -7,78 +7,9 @@ from collections import deque, defaultdict
 import math  # Operations on complex numbers are supported in native python, but we must find a library for this in java
 import cmath
 
-import numpy as np  # Get rid of numpy
-from numpy import ndarray, dtype
+import numpy as np
 import matplotlib.pyplot as plt
-"""
-Goal:
-        Based on a technique presented in
-        https://www.youtube.com/watch?v=gsJHzBTPG0Y&t=715s We are attempting to
-        generate heightmaps using a combination of DLA and blur algorithms.
-        These heightmaps are suitable for generating mountains with natural
-        looking veins.
 
-Definitions:
-        Image: An traversable_image that is represented by a square grid of floating point
-                numbers between 0 and 255.
-        Pixel: A grid location in the Image that holds a floating point value
-                between 0 and 255. Additionally, a Pixel will keep track of the
-                one pixel it connected to through a random walk. Pixels can
-                perform random walks where the can go either up, down, left, or
-                right.
-
-Steps:
-        General Algorithm:
-                1. Starting with a small Image (see "Image" definition), we 
-                        first place a pixel of maximum brightness at the center.
-                2. At a pseudo-random grid location determined by a seed value, 
-                        we place another pixel (see "Pixel" definition) and 
-                        perform a random walk through the grid until the pixel 
-                        is adjacent to an existing pixel in the grid. We freeze 
-                        this pixel in place.
-                3. We calculate the density of the traversable_image defined by comparing 
-                        the number bright grid locations to the number of dark 
-                        grid locations.
-                4. We repeat steps 1-3 until the density passes a threshold, we
-                        increase the size of the Image and upscale the pixels.
-
-        Upscaling:
-                There are two types of Image upscaling used in this algorithm: A
-                crisp upscale and a blurry upscale.
-
-                5. When we perform an upscale on the Image, we need to perform 
-                        both a crisp upscale and a blurry upscale.
-                6. Taking the Image with the crisp upscale, we continue to add
-                        detail to this traversable_image through the process outlined in 
-                        steps 1-4.
-                7. Once the density desired in step 4 is achieved, we add the
-                        detail from the crisp upscale to the blurry upscale, 
-                        while keeping the crisp upscale for future crisp 
-                        upscales.
-
-        Crisp Upscale:
-                8. When we perform step 2, we must keep track of the frozen
-                        pixel that the new pixel gets stuck to.
-                9. Using the connections from step 8, we can redraw these
-                        connections as lines using the scale of the new Image.
-                10. The lines from step 9 can be split at their  midpoint, and 
-                        this midpoint can be jittered to create a  more natural
-                        result.
-
-        Blurry Upscale:
-                11. Using the original crisp traversable_image, we first assign the
-                        outermost pixels a weight of 1.
-                12. We then recursively assign other pixels the maximum
-                        weight of all the pixels downstream from the target.
-                13. Use the smooth falloff formula (1 - (1/(1+h)) to clamp
-                        the weights of pixels of higher weights.
-                14. We then use bicubic interpolation to upscale the 
-                        Image to the new size.
-                15. Lastly, we use convolutions to assign each pixel a
-                        weighted average of the adjacent pixels.
-"""
-
-# TODO: Rewrite with a class based approach
 
 DEBUG = True
 
@@ -208,46 +139,44 @@ def constrain(value: int | float, low: int | float, high: int | float) -> Tuple[
     return max(low, min(high, value)), value == max(low, min(high, value))
 
 
-# TODO: Port this function to pure python
-def bezier_sigmoid(a: int | float, m: int | float, b: int | float, precision=10000) -> ndarray[Any, dtype[Any]] | None:
+def bezier_sigmoid(a, m, b, precision=10000):
+    def bezier_curve(t, p0, p1, p2, p3):
+        return ((1 - t) ** 3 * p0[0] + 3 * (1 - t) ** 2 * t * p1[0] + 3 * (1 - t) * t ** 2 * p2[0] + t ** 3 * p3[0],
+                (1 - t) ** 3 * p0[1] + 3 * (1 - t) ** 2 * t * p1[1] + 3 * (1 - t) * t ** 2 * p2[1] + t ** 3 * p3[1])
 
-    def bezier_curve(time_value, control_point_0, control_point_1, control_point_2, control_point_3):
-        return (1 - time_value)**3 * control_point_0 + 3 * (1 - time_value)**2 * time_value * control_point_1 + 3 * (1 - time_value) * time_value**2 * control_point_2 + time_value**3 * control_point_3
-
-    def vertical_line_test(bezier_points):
+    def vertical_line_test(points):
         x = 0
-        for point in bezier_points:
+        for point in points:
             if point[0] > x:
                 x = point[0]
-            if point[0] < x:
+            elif point[0] < x:
                 return False
         return True
 
     # Define control points
-    control_point_0 = np.array([0.0, 1.0])
-    control_point_3 = np.array([a, 0.0])
+    p0 = (0.0, 1.0)
+    p3 = (a, 0.0)
 
-    control_line = control_point_0[1] - m * control_point_0[0]
-    initial_line_x = (1 - control_line) / m
-    final_line_x = (0 - control_line) / m
+    control_line = p0[1] - m * p0[0]
+    initial_line_x = (1 - control_line) * m
+    final_line_x = (0 - control_line) * m
     midpoint = (initial_line_x + final_line_x) / 2
     offset = b - midpoint
     initial_line_x += offset
     final_line_x += offset
 
-    control_point_1 = np.array([initial_line_x, 1.0])
-    control_point_2 = np.array([final_line_x, 0.0])
+    p1 = (initial_line_x, 1.0)
+    p2 = (final_line_x, 0.0)
 
     # Find the bezier points
-    time_values = np.linspace(0, 1, precision)
-    bezier_points = np.array([bezier_curve(t, control_point_0, control_point_1, control_point_2, control_point_3) for t in time_values])
+    bezier_points = [bezier_curve(t / precision, p0, p1, p2, p3) for t in range(precision + 1)]
 
     # Check if curve passes the vertical line test
-    is_function = vertical_line_test(bezier_points)
-    if not is_function:
+    if not vertical_line_test(bezier_points):
         raise ArithmeticError(f"For the given parameters (a={a}, m={m}, b={b}), a function cannot be formed.")
 
     return bezier_points
+
 
 
 def smooth_falloff(x: int | float, k: int | float) -> float:
