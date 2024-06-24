@@ -318,7 +318,7 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
         # The line_segments list should contain pairs of the endpoints of each
         # line segment found
         origin = [traversable_image.origin.x, traversable_image.origin.y, 0]
-        inbound, _ = build_graph_adjacency_lists(traversable_image)
+        inbound_edges, _ = build_graph_adjacency_lists(traversable_image)
 
         visited = []
         stack = deque()
@@ -336,7 +336,7 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
                 subject = stack.pop()
                 subject_index = subject[0] * traversable_image.size + subject[1]
 
-                for node_index in reversed(inbound[subject_index]):
+                for node_index in reversed(inbound_edges[subject_index]):
                         node = [node_index // traversable_image.size, node_index % traversable_image.size, subject[2]]
 
                         previous_direction = current_direction
@@ -363,7 +363,7 @@ def find_contiguous_line_segments(traversable_image: Image) -> Any:
                                         current_direction = Direction.SOUTH_WEST
 
                         is_origin = subject == origin
-                        is_intersection = len(inbound[subject_index]) > 1
+                        is_intersection = len(inbound_edges[subject_index]) > 1
                         if is_intersection:
                                 intersection_points.append(node)
                         is_direction_change_only = previous_direction is not None and (previous_direction != current_direction) and not is_intersection and subject not in intersection_points
@@ -506,7 +506,7 @@ def apply_downstream_height(traversable_image: Image, clamp: int) -> Image:
         # Set the origin of the new traversable_image to the same as it was in the input
         new_image.origin = new_image.grid[traversable_image.origin.x][traversable_image.origin.y]
 
-        inbound, _ = build_graph_adjacency_lists(traversable_image)
+        inbound_edges, _ = build_graph_adjacency_lists(traversable_image)
 
         def get_downstream_count(index: int) -> int:
                 # Get the maximum number of downstream pixels for any pixel
@@ -517,16 +517,16 @@ def apply_downstream_height(traversable_image: Image, clamp: int) -> Image:
                 # should have a weight of 0
 
                 # DFS to find the longest path of downstream nodes
-                def dfs(node, memo):
+                def depth_first_search(node, memo):
                         if node in memo:
                                 return memo[node]
                         max_length = 0
-                        for neighbor in inbound[node]:
-                                max_length = max(max_length, dfs(neighbor, memo))
+                        for neighbor in inbound_edges[node]:
+                                max_length = max(max_length, depth_first_search(neighbor, memo))
                         memo[node] = max_length + 1
                         return memo[node]
 
-                return dfs(index, {})
+                return depth_first_search(index, {})
 
         # Use the downstream count of each pixel to calculate its brightness
         downstream_counts = [0 for _ in range(traversable_image.size**2)]
@@ -543,7 +543,7 @@ def apply_downstream_height(traversable_image: Image, clamp: int) -> Image:
 
                 downstream_counts[subject_index] = get_downstream_count(subject_index)
 
-                for node in inbound[subject_index]:
+                for node in inbound_edges[subject_index]:
                         next_node = (node // traversable_image.size, node % traversable_image.size)
                         if next_node not in visited:
                                 visited.append(next_node)
@@ -678,14 +678,14 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
                 gaussian_filter = [[0] * size for _ in range(size)]
 
                 center = size // 2
-                c = 1 / (2 * math.pi * sigma**2)
+                constant_term = 1 / (2 * math.pi * sigma**2)
 
                 total = 0
                 for i in range(size):
                         for j in range(size):
                                 x = i - center
                                 y = j - center
-                                gaussian_filter[i][j] = c * math.e**-((x**2 + y**2) / (2 * sigma**2))
+                                gaussian_filter[i][j] = constant_term * math.e**-((x**2 + y**2) / (2 * sigma**2))
                                 total += gaussian_filter[i][j]
 
                 for i in range(size):
