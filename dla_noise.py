@@ -1,6 +1,6 @@
 import copy
 import enum
-from typing import List, Self, Tuple, Any, Optional, Dict
+from typing import List, Self, Tuple, Optional, Dict
 import random
 import time
 from collections import deque, defaultdict
@@ -13,14 +13,14 @@ import matplotlib.pyplot as plt
 DEBUG = True
 
 GLOBAL_DIRECTIONS = (
-        (-1, -1),  # North West
-        (0, -1),  # North
-        (1, -1),  # North East
-        (1, 0),  # East
-        (1, 1),  # South East
-        (0, 1),  # South
-        (-1, 1),  # South West
-        (-1, 0),  # West
+    (-1, -1),  # North West
+    (0, -1),  # North
+    (1, -1),  # North East
+    (1, 0),  # East
+    (1, 1),  # South East
+    (0, 1),  # South
+    (-1, 1),  # South West
+    (-1, 0),  # West
 )
 
 
@@ -183,7 +183,7 @@ def calculate_density(image: Image) -> float:
 
 
 def build_graph_adjacency_lists(traversable_image: Image) -> Tuple[List[List[Optional[int]]], List[List[Optional[int]]]]:
-    inbound_adjacency_list: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
+    inbound_adjacency_list: List[List[Optional[int]]] = [[] for _ in range(traversable_image.size**2)]
     for x in range(traversable_image.size):
         for y in range(traversable_image.size):
             pixel = traversable_image.grid[x][y]
@@ -193,7 +193,7 @@ def build_graph_adjacency_lists(traversable_image: Image) -> Tuple[List[List[Opt
             elif not pixel.frozen:
                 inbound_adjacency_list[x * traversable_image.size + y].append(None)
 
-    outbound_adjacency_list: List[List[int | None]] = [[] for _ in range(traversable_image.size**2)]
+    outbound_adjacency_list: List[List[Optional[int]]] = [[] for _ in range(traversable_image.size**2)]
     for edges_index, edges in enumerate(inbound_adjacency_list):
         for edge in edges:
             if edge is not None:
@@ -204,7 +204,7 @@ def build_graph_adjacency_lists(traversable_image: Image) -> Tuple[List[List[Opt
     return inbound_adjacency_list, outbound_adjacency_list
 
 
-def draw_bresenham_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
+def create_bresenham_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
     difference_x = abs(final_x - initial_x)
     difference_y = abs(final_y - initial_y)
     step_x = 1 if initial_x < final_x else -1
@@ -309,10 +309,10 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
     #       follows the edges of this geometry. This edges tuple can be generated
     #       dependent on the geometry
     edges = (
-            ((0, image.size - 1), (0, 0)),  # Top
-            ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
-            ((image.size - 1, image.size - 1), (0, image.size - 1)),  # Right
-            ((0, 0), (0, image.size - 1)),  # Left
+        ((0, image.size - 1), (0, 0)),  # Top
+        ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
+        ((image.size - 1, image.size - 1), (0, image.size - 1)),  # Right
+        ((0, 0), (0, image.size - 1)),  # Left
     )
 
     walkers = []
@@ -372,7 +372,7 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
                 final_x = int((edge // traversable_image.size) * scale_factor)
                 final_y = int((edge % traversable_image.size) * scale_factor)
 
-                line_points = draw_bresenham_line(initial_x, initial_y, final_x, final_y)
+                line_points = create_bresenham_line(initial_x, initial_y, final_x, final_y)
                 for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
                     line_pixel = new_image.grid[line_point_x][line_point_y]
                     line_pixel.weight = 100 + 20 * line_point_index
@@ -394,8 +394,6 @@ def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
 
 
 def jitter_contiguous_lines(traversable_image: Image) -> Image:
-    # TODO: 2 things to experiment with:
-    #       - Using bezier curves to jitter line segments
     pass
 
 
@@ -652,7 +650,18 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
     return new_image
 
 
-def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int) -> List[Image]:
+def create_dla_noise(
+    seed: int,
+    initial_size: int,
+    end_size: int,
+    initial_density_threshold: float,
+    density_falloff_extremity: float,
+    density_falloff_bias: float,
+    use_concurrent_walkers: bool,
+    upscale_factor: float,
+    jitter_range: int,
+    smoothness: int,
+) -> List[Image]:
     images = []
 
     image = Image(initial_size)
@@ -689,7 +698,6 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
             print(f"Image Density {image.density}")
             print(f"Step Density Threshold: {step_density_threshold}")
 
-        # Simulate random walks
         while image.density < step_density_threshold:
             number_concurrent_walkers: int
             if use_concurrent_walkers:
@@ -705,8 +713,8 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
 
         images.append(copy.copy(image))
 
-        image_sum += gaussian_blur(apply_downstream_height(image, 300), 3)
-        image_sum = bilinear_upscale(image_sum, int(image_sum.size * upscale_factor))
+        image_sum += apply_downstream_height(image, 300)
+        image_sum = gaussian_blur(bicubic_upscale(image_sum, int(image_sum.size * upscale_factor)), smoothness)
         image = crisp_upscale(image, int(image.size * upscale_factor))
 
     return images + [image_sum]
@@ -731,7 +739,18 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=5)
+    images = create_dla_noise(
+        seed=random.randint(0, 1000),
+        initial_size=50,
+        end_size=1000,
+        initial_density_threshold=0.1,
+        density_falloff_extremity=2,
+        density_falloff_bias=1 / 3,
+        use_concurrent_walkers=True,
+        upscale_factor=2,
+        jitter_range=5,
+        smoothness=10,
+    )
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
@@ -775,14 +794,6 @@ def test():
     # image.values[6][6].frozen = True
     # image.values[6][6].weight = 30
     # image.values[6][6].struck = image.values[6][5]
-
-    # blurred_image = gaussian_blur(image, image.size // 2)
-    # display_image(blurred_image)
-
-    display_image(image)
-    upscaled = bicubic_upscale(image, 300)
-    display_image(upscaled)
-    display_image(gaussian_blur(upscaled, 10))
 
 
 if __name__ == "__main__":
