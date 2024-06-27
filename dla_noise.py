@@ -103,7 +103,6 @@ class Pixel:
         frozen: bool
         weight: float
         struck: Optional[Self]
-        coords: tuple[int, int]
 
         def __init__(self, x: int, y: int):
                 self.x = x
@@ -113,10 +112,6 @@ class Pixel:
                 self.frozen = False
                 self.weight = 0
                 self.struck = None
-
-        @property
-        def coords(self) -> tuple[int, int]:
-                return self.x, self.y
 
 
 class Image:
@@ -398,12 +393,18 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         #       we can use bresenham's line algorithm to roughly model an equation that
         #       follows the edges of this geometry. This edges tuple can be generated
         #       dependent on the geometry
-        edges = image.boundary.edges
+        edges = (
+                        ((0, image.size - 1), (0, 0)),  # Top
+                        ((0, image.size - 1), (image.size - 1, image.size - 1)),  # Bottom
+                        ((image.size - 1, image.size - 1), (0, image.size - 1)),  # Right
+                        ((0, 0), (0, image.size - 1)),  # Left
+        )
 
         walkers = []
         for walker in range(num_concurrent_walkers):
                 edge = random.choice(edges)
-                x, y = random.choice(edge)
+                x = random.randint(edge[0][0], edge[0][1])
+                y = random.randint(edge[1][0], edge[1][1])
                 while image.grid[x][y].frozen:
                         x = random.randint(0, image.size - 1)
                         y = random.randint(0, image.size - 1)
@@ -415,25 +416,27 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
         while walkers:
                 for i, path in enumerate(walkers):
                         direction = random.choice(GLOBAL_DIRECTIONS)
+                        x, _ = constrain(path[-1][0] + direction[0], 0, image.size - 1)
+                        y, _ = constrain(path[-1][1] + direction[1], 0, image.size - 1)
 
-                        if image[path[-1][0] + direction[0], path[-1][1] + direction[1]].frozen:
+                        if image.grid[x][y].frozen:
                                 previous_x = path[-1][0]
                                 previous_y = path[-1][1]
 
                                 pixel = image.grid[previous_x][previous_y]
-                                pixel.struck = image[path[-1][0] + direction[0], path[-1][1] + direction[1]]
+                                pixel.struck = image.grid[x][y]
                                 pixel.frozen = True
                                 pixel.weight = 100
                                 walkers.pop(i)
 
-                        path.append(image[path[-1][0] + direction[0], path[-1][1] + direction[1]].coords)
+                        path.append((x, y))
 
         return walkers
 
 
 def crisp_upscale(traversable_image: Image, new_image_size: int) -> Image:
+        new_image = Image(new_image_size)
         scale_factor = new_image_size / traversable_image.size
-        new_image = Image(Boundary([[int(point[0] * scale_factor), int(point[1] * scale_factor)] for point in traversable_image.boundary.points]))
 
         new_image.origin = new_image.grid[int(traversable_image.origin.x * scale_factor)][int(traversable_image.origin.y * scale_factor)]
 
@@ -480,7 +483,7 @@ def jitter_contiguous_lines(traversable_image: Image) -> Image:
 
 
 def apply_downstream_height(traversable_image: Image, clamp: int) -> Image:
-        new_image = Image(traversable_image.boundary)
+        new_image = Image(traversable_image.size)
 
         new_image.origin = new_image.grid[traversable_image.origin.x][traversable_image.origin.y]
 
@@ -537,8 +540,8 @@ def apply_downstream_height(traversable_image: Image, clamp: int) -> Image:
 
 
 def bilinear_upscale(image: Image, new_image_size: int) -> Image:
+        new_image = Image(new_image_size)
         scale_factor = new_image_size / image.size
-        new_image = Image(Boundary([[int(point[0] * scale_factor), int(point[1] * scale_factor)] for point in image.boundary.points]))
 
         for i in range(new_image_size):
                 for j in range(new_image_size):
@@ -567,8 +570,8 @@ def bilinear_upscale(image: Image, new_image_size: int) -> Image:
 
 # BELOW FUNCTION WAS IMPLEMENTED BY CHATGPT
 def bicubic_upscale(image: Image, new_image_size: int) -> Image:
+        new_image = Image(new_image_size)
         scale_factor = new_image_size / image.size
-        new_image = Image(Boundary([[int(point[0] * scale_factor), int(point[1] * scale_factor)] for point in image.boundary.points]))
 
         def cubic(x):
                 absolute_x = abs(x)
@@ -588,7 +591,9 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
                 result = 0
                 for m in range(-1, 3):
                         for n in range(-1, 3):
-                                weight = image[x_floor + m, y_floor + n].weight
+                                x_index = int(constrain(x_floor + m, 0, image.size - 1)[0])
+                                y_index = int(constrain(y_floor + n, 0, image.size - 1)[0])
+                                weight = image[x_index, y_index].weight
                                 result += weight * cubic(m - x_difference) * cubic(n - y_difference)
 
                 return max(0, result)
@@ -604,7 +609,7 @@ def bicubic_upscale(image: Image, new_image_size: int) -> Image:
 
 
 def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
-        new_image = Image(image.boundary)
+        new_image = Image(image.size)
 
         def create_kernel(size, sigma):
                 gaussian_filter = [[0] * size for _ in range(size)]
@@ -730,8 +735,8 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
 def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int, smoothness: int) -> List[Image]:
         images = []
 
-        image = Image(Boundary([[0, 0], [0, initial_size], [initial_size, 0], [initial_size, initial_size]]))
-        image_sum = Image(Boundary([[0, 0], [0, initial_size], [initial_size, 0], [initial_size, initial_size]]))
+        image = Image(initial_size)
+        image_sum = Image(initial_size)
 
         random.seed(seed)
 
