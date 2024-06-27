@@ -1,6 +1,9 @@
-from typing import *
 from collections import deque
 import math
+from typing import *
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 class Boundary:
@@ -68,6 +71,7 @@ class Boundary:
 
         return line
 
+
 class Pixel:
     x: int
     y: int
@@ -86,15 +90,6 @@ class Pixel:
         self.weight = 0
         self.struck = None
 
-    def __repr__(self):
-        if self.flooded:
-            return "FLOOD"
-        elif self.boundary:
-            return "BOUND"
-        elif self.frozen:
-            return "FROZN"
-        else:
-            return "BLANK"
 
 class Image:
     size: int
@@ -148,7 +143,39 @@ class Image:
                 if y < self.size - 1:
                     queue.append((x, y + 1))
 
-    def __getitem__(self, index):
+    def weights(self) -> list[list[int]]:
+        weights = [[]] * self.size
+        for i in range(self.size):
+            weights[i] = [pixel.weight for pixel in self.grid[i]]
+        return weights
+
+    def graph(self):
+        pass
+
+    def traversable(self) -> bool:
+        pass
+
+    def show(self) -> None:
+        weights = []
+        for i in range(self.size):
+            weights.append([])
+            for j in range(self.size):
+                if self[j, i, False].flooded:
+                    weights[i].append(-50)
+                elif self[j, i, False].boundary:
+                    weights[i].append(-10)
+                else:
+                    weights[i].append(self[j, i, False].weight)
+        weights = np.array(weights)
+
+        plt.imshow(weights, cmap="terrain", origin="upper")
+        plt.colorbar(label="Weight")
+        plt.title("Heightmap Based on 2D Array of Weights")
+        plt.xlabel("X coordinate")
+        plt.ylabel("Y coordinate")
+        plt.show()
+
+    def __getitem__(self, index: tuple[int, int, bool]):
         x: int = index[0]
         y: int = index[1]
         clamp: bool = index[2]
@@ -189,13 +216,25 @@ class Image:
                     visited.add((nx, ny))
                     queue.append((nx, ny))
 
-    def __repr__(self):
-        string = ""
+    def __add__(self, other: Self) -> Self:
+        if self.size != other.size:
+            raise ValueError("Image must be the same size")
+
+        if self.boundary.points != other.boundary.points:
+            raise ValueError("Image must have the same boundary")
+
+        new_image = Image(Boundary(self.boundary.points))
         for i in range(self.size):
             for j in range(self.size):
-                string += str(self.grid[i][j]) + " "
-            string += "\n"
-        return string
+                if (
+                    not self.grid[i][j].flooded
+                    and other.grid[i][j].flooded
+                ):
+                    new_image.grid[i][j].weight = (
+                        self.grid[i][j].weight + other.grid[i][j].weight
+                    )
+
+        return new_image
 
 
 def circle(radius: int, precision=5) -> list[list[int]]:
@@ -209,9 +248,7 @@ def circle(radius: int, precision=5) -> list[list[int]]:
 
 
 if __name__ == "__main__":
-    boundary = Boundary(circle(5, precision=30))
-    image = Image(boundary)
-
-    print(image[0, 10, True].x, image[0, 10, True].y)
-
-    print(image)
+    i1 = Image(Boundary([[0, 0], [10, 0], [5, 10]]))
+    i2 = Image(Boundary([[0, 0], [10, 0], [5, 10]]))
+    i3 = i1 + i2
+    i3.show()
