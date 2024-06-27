@@ -23,11 +23,7 @@ class Boundary:
 
         for i in range(len(self.points)):
             p0 = self.points[i]
-            p1 = (
-                self.points[i + 1]
-                if i < len(self.points) - 1
-                else self.points[0]
-            )
+            p1 = self.points[i + 1] if i < len(self.points) - 1 else self.points[0]
             line = self.get_line(p0[0], p0[1], p1[0], p1[1])
             edges.append(line)
 
@@ -46,9 +42,7 @@ class Boundary:
         return max(width, height) + 1
 
     @staticmethod
-    def get_line(
-        x0: int, y0: int, x1: int, y1: int
-    ) -> list[tuple[int, int]]:
+    def get_line(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
         sx = 1 if x0 < x1 else -1
@@ -100,10 +94,7 @@ class Image:
     def __init__(self, boundary: Boundary):
         self.boundary = boundary
         self.size = boundary.size
-        self.grid = [
-            [Pixel(j, i) for j in range(self.size)]
-            for i in range(self.size)
-        ]
+        self.grid = [[Pixel(j, i) for j in range(self.size)] for i in range(self.size)]
         self.origin = None
 
         for edge in boundary.edges:
@@ -129,10 +120,7 @@ class Image:
         # Perform the flood fill
         while queue:
             x, y = queue.popleft()
-            if (
-                not self[x, y, False].flooded
-                and not self[x, y, False].boundary
-            ):
+            if not self[x, y, False].flooded and not self[x, y, False].boundary:
                 self[x, y, False].flooded = True
                 if x > 0:
                     queue.append((x - 1, y))
@@ -208,11 +196,7 @@ class Image:
                 (cx - 1, cy + 1),
                 (cx + 1, cy - 1),
             ]:
-                if (
-                    0 <= nx < self.size
-                    and 0 <= ny < self.size
-                    and (nx, ny) not in visited
-                ):
+                if 0 <= nx < self.size and 0 <= ny < self.size and (nx, ny) not in visited:
                     visited.add((nx, ny))
                     queue.append((nx, ny))
 
@@ -226,13 +210,8 @@ class Image:
         new_image = Image(Boundary(self.boundary.points))
         for i in range(self.size):
             for j in range(self.size):
-                if (
-                    not self.grid[i][j].flooded
-                    and other.grid[i][j].flooded
-                ):
-                    new_image.grid[i][j].weight = (
-                        self.grid[i][j].weight + other.grid[i][j].weight
-                    )
+                if not self.grid[i][j].flooded and other.grid[i][j].flooded:
+                    new_image.grid[i][j].weight = self.grid[i][j].weight + other.grid[i][j].weight
 
         return new_image
 
