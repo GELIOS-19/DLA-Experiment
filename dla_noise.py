@@ -120,6 +120,18 @@ class Border:
     def hexagon(size):
         return Border([[(size // 3), 0], [(size // 3) * 2, 0], [(size // 3), size], [(size // 3) * 2, size], [0, (size // 3)], [0, (size // 3) * 2], [size, (size // 3)], [size, (size // 3) * 2]])
 
+    @staticmethod
+    def circle(size):
+        precision = 100
+        radius = size // 2
+        points = []
+        for i in range(precision):
+            theta = 2 * math.pi * i / precision
+            x = round(radius + radius * math.cos(theta))
+            y = round(radius + radius * math.sin(theta))
+            points.append([x, y])
+        return Border(points)
+
     def scale(self, new_size) -> Self:
         scale_factor = new_size / self.size
         return Border([[int(p[0] * scale_factor), int(p[1] * scale_factor)] for p in self.border_points])
@@ -865,8 +877,8 @@ def main():
 
 
 def test():
-    image1 = Image(Border.hexagon(100))
-    image2 = Image(Border.square(100))
+    image1 = Image(Border.circle(10))
+    image2 = Image(Border.triangle(10))
 
     for image in (image1, image2):
         image.origin = image.grid[5][5]
@@ -894,11 +906,8 @@ def test():
         image.grid[7][5].struck = image.grid[6][5]
 
     image_sum = image1 + image2
-    # print(image_sum.border.border_points)
-    # display_image(image_sum)
-    # print(image_sum[40, 4022].coordinates)
-    display_image(image1)
+    display_image(bilinear_upscale(image_sum, 100))
 
 
 if __name__ == "__main__":
-    main()
+    test()
