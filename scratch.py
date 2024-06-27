@@ -13,9 +13,7 @@ class Boundary:
 
     def __init__(self, points: list[list[int]]):
         if len(points) < 3:
-            raise ValueError(
-                "Boundary must have at least 3 points"
-            )
+            raise ValueError("Boundary must have at least 3 points")
 
         self.points = points
 
@@ -27,14 +25,8 @@ class Boundary:
 
         for i in range(len(self.points)):
             p0 = self.points[i]
-            p1 = (
-                self.points[i + 1]
-                if i < len(self.points) - 1
-                else self.points[0]
-            )
-            line = self.get_line(
-                p0[0], p0[1], p1[0], p1[1]
-            )
+            p1 = self.points[i + 1] if i < len(self.points) - 1 else self.points[0]
+            line = self.get_line(p0[0], p0[1], p1[0], p1[1])
             edges.append(line)
 
         return edges
@@ -52,9 +44,7 @@ class Boundary:
         return max(width, height) + 1
 
     @staticmethod
-    def get_line(
-        x0: int, y0: int, x1: int, y1: int
-    ) -> list[tuple[int, int]]:
+    def get_line(x0: int, y0: int, x1: int, y1: int) -> list[tuple[int, int]]:
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
         sx = 1 if x0 < x1 else -1
@@ -106,20 +96,12 @@ class Image:
     def __init__(self, boundary: Boundary):
         self.boundary = boundary
         self.size = boundary.size
-        self.grid = [
-            [
-                Pixel(j, i)
-                for j in range(self.size)
-            ]
-            for i in range(self.size)
-        ]
+        self.grid = [[Pixel(j, i) for j in range(self.size)] for i in range(self.size)]
         self.origin = None
 
         for edge in boundary.edges:
             for point in edge:
-                self[
-                    point[0], point[1], False
-                ].boundary = True
+                self[point[0], point[1], False].boundary = True
 
         self.__flood_fill()
 
@@ -130,24 +112,17 @@ class Image:
         for i in range(self.size):
             if not self[0, i, False].boundary:
                 queue.append((0, i))
-            if not self[
-                self.size - 1, i, False
-            ].boundary:
+            if not self[self.size - 1, i, False].boundary:
                 queue.append((self.size - 1, i))
             if not self[i, 0, False].boundary:
                 queue.append((i, 0))
-            if not self[
-                i, self.size - 1, False
-            ].boundary:
+            if not self[i, self.size - 1, False].boundary:
                 queue.append((i, self.size - 1))
 
         # Perform the flood fill
         while queue:
             x, y = queue.popleft()
-            if (
-                not self[x, y, False].flooded
-                and not self[x, y, False].boundary
-            ):
+            if not self[x, y, False].flooded and not self[x, y, False].boundary:
                 self[x, y, False].flooded = True
                 if x > 0:
                     queue.append((x - 1, y))
@@ -161,10 +136,7 @@ class Image:
     def weights(self) -> list[list[int]]:
         weights = [[]] * self.size
         for i in range(self.size):
-            weights[i] = [
-                pixel.weight
-                for pixel in self.grid[i]
-            ]
+            weights[i] = [pixel.weight for pixel in self.grid[i]]
         return weights
 
     def graph(self):
@@ -183,9 +155,7 @@ class Image:
                 elif self[j, i, False].boundary:
                     weights[i].append(-10)
                 else:
-                    weights[i].append(
-                        self[j, i, False].weight
-                    )
+                    weights[i].append(self[j, i, False].weight)
         weights = np.array(weights)
 
         plt.imshow(
@@ -194,16 +164,12 @@ class Image:
             origin="upper",
         )
         plt.colorbar(label="Weight")
-        plt.title(
-            "Heightmap Based on 2D Array of Weights"
-        )
+        plt.title("Heightmap Based on 2D Array of Weights")
         plt.xlabel("X coordinate")
         plt.ylabel("Y coordinate")
         plt.show()
 
-    def __getitem__(
-        self, index: tuple[int, int, bool]
-    ):
+    def __getitem__(self, index: tuple[int, int, bool]):
         x: int = index[0]
         y: int = index[1]
         clamp: bool = index[2]
@@ -236,69 +202,38 @@ class Image:
                 (cx - 1, cy + 1),
                 (cx + 1, cy - 1),
             ]:
-                if (
-                    0 <= nx < self.size
-                    and 0 <= ny < self.size
-                    and (nx, ny) not in visited
-                ):
+                if 0 <= nx < self.size and 0 <= ny < self.size and (nx, ny) not in visited:
                     visited.add((nx, ny))
                     queue.append((nx, ny))
 
     def __add__(self, other: Self) -> Self:
         if self.size != other.size:
-            raise ValueError(
-                "Image must be the same size"
-            )
+            raise ValueError("Image must be the same size")
 
-        if (
-            self.boundary.points
-            != other.boundary.points
-        ):
-            raise ValueError(
-                "Image must have the same boundary"
-            )
+        if self.boundary.points != other.boundary.points:
+            raise ValueError("Image must have the same boundary")
 
-        new_image = Image(
-            Boundary(self.boundary.points)
-        )
+        new_image = Image(Boundary(self.boundary.points))
         for i in range(self.size):
             for j in range(self.size):
-                if (
-                    not self.grid[i][j].flooded
-                    and other.grid[i][j].flooded
-                ):
-                    new_image.grid[i][
-                        j
-                    ].weight = (
-                        self.grid[i][j].weight
-                        + other.grid[i][j].weight
-                    )
+                if not self.grid[i][j].flooded and other.grid[i][j].flooded:
+                    new_image.grid[i][j].weight = self.grid[i][j].weight + other.grid[i][j].weight
 
         return new_image
 
 
-def circle(
-    radius: int, precision=5
-) -> list[list[int]]:
+def circle(radius: int, precision=5) -> list[list[int]]:
     points = []
     for i in range(precision):
         theta = 2 * math.pi * i / precision
-        x = round(
-            radius + radius * math.cos(theta)
-        )
-        y = round(
-            radius + radius * math.sin(theta)
-        )
+        x = round(radius + radius * math.cos(theta))
+        y = round(radius + radius * math.sin(theta))
         points.append([x, y])
     return points
 
 
 if __name__ == "__main__":
-    i1 = Image(
-        Boundary([[0, 0], [10, 0], [5, 10]])
-    )
-    i2 = Image(
-        Boundary([[0, 0], [10, 0], [5, 10]])
-    )
+    i1 = Image(Boundary([[0, 0], [10, 0], [5, 10]]))
+    i2 = Image(Boundary([[0, 0], [10, 0], [5, 10]]))
     i3 = i1 + i2
     i3.show()
