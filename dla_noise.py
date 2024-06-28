@@ -36,6 +36,26 @@ class Direction(enum.Enum):
     WEST = 7
 
 
+def perpendicular_direction(direction: Direction) -> Direction:
+    match direction:
+        case Direction.NORTH_WEST:
+            return Direction.SOUTH_WEST
+        case Direction.NORTH:
+            return Direction.EAST
+        case Direction.NORTH_EAST:
+            return Direction.SOUTH_EAST
+        case Direction.EAST:
+            return Direction.SOUTH
+        case Direction.SOUTH_EAST:
+            return Direction.NORTH_EAST
+        case Direction.SOUTH:
+            return Direction.WEST
+        case Direction.SOUTH_WEST:
+            return Direction.NORTH_WEST
+        case Direction.WEST:
+            return Direction.NORTH
+
+
 def bresenham_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
     x_difference = abs(final_x - initial_x)
     y_difference = abs(final_y - initial_y)
@@ -235,7 +255,7 @@ class Image:
 
         while queue:
             current_x, current_y = queue.popleft()
-            if self.grid[current_x][current_y].border:
+            if not (self.grid[current_x][current_y].dead or self.grid[current_x][current_y].border):
                 return self.grid[current_x][current_y]
 
             for neighbor_x, neighbor_y in [(current_x + direction[0], current_y + direction[1]) for direction in GLOBAL_DIRECTIONS]:
@@ -366,10 +386,16 @@ def graph(image: Image) -> Tuple[List[List[Optional[int]]], List[List[Optional[i
             else:
                 outbound_adjacency_list[edges_index].append(None)
 
+    for x in range(image.size):
+        for y in range(image.size):
+            if image.grid[x][y].dead or image.grid[x][y].border:
+                inbound_adjacency_list[x * image.size + y].append(None)
+                outbound_adjacency_list[x * image.size + y].append(None)
+
     return inbound_adjacency_list, outbound_adjacency_list
 
 
-def find_contiguous_line_segments(image: Image) -> Dict[int, Dict[str, int]]:
+def find_contiguous_line_segments(image: Image) -> Dict[int, Dict[str, Direction | List[int]]]:
     origin = [image.origin.x, image.origin.y, 0]
     inbound_adjacency_list, _ = graph(image)
 
@@ -437,8 +463,9 @@ def find_contiguous_line_segments(image: Image) -> Dict[int, Dict[str, int]]:
             stack.append(node)
 
     for key in mappings.keys():
-        if len(mappings[key]["starts_at"]) == 3 and len(mappings[key]["ends_at"]) == 3:
+        if len(mappings[key]["starts_at"]) == 3:
             mappings[key]["starts_at"].pop(2)
+        if len(mappings[key]["ends_at"]) == 3:
             mappings[key]["ends_at"].pop(2)
 
     return dict(mappings)
@@ -518,8 +545,18 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
     return new_image
 
 
-def jitter_contiguous_lines(traversable_image: Image) -> Image:
-    pass
+def jitter_contiguous_lines(image: Image) -> Image:
+    contiguous_line_segments = find_contiguous_line_segments(image)
+
+    for segment_id, segment_info in contiguous_line_segments.items():
+        start_x, start_y = segment_info["starts_at"]
+        end_x, end_y = segment_info["ends_at"]
+        direction = segment_info["direction"]
+
+        line_points = bresenham_line(start_x, start_y, end_x, end_y)
+        print(line_points)
+
+    return image
 
 
 def calculate_heights(image: Image, clamp: int) -> Image:
@@ -775,8 +812,8 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
 def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int, smoothness: int) -> List[Image]:
     images = []
 
-    image = Image(Border.triangle(initial_size))
-    image_sum = Image(Border.triangle(initial_size))
+    image = Image(Border.circle(initial_size))
+    image_sum = Image(Border.circle(initial_size))
 
     random.seed(seed)
 
@@ -806,7 +843,7 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         if DEBUG:
             print(f"Step: {step + 1}")
             print(f"Image Size: {image.size}x{image.size}")
-            print(f"Image Density {image.density}")
+            print(f"Image Density: {image.density}")
             print(f"Step Density Threshold: {step_density_threshold}")
 
         while image.density < step_density_threshold:
@@ -819,29 +856,29 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
                 count_concurrent_walkers = 1
 
             if DEBUG:
-                print(f"Step: {step + 1}, Simulating Random Walk")
+                print(f"Step: {step + 1} :: Simulating Random Walk")
             simulate_random_walk(image, count_concurrent_walkers)
 
             if DEBUG:
-                print(f"Step: {step + 1}, Calculating Density")
+                print(f"Step: {step + 1} :: Calculating Density")
             image.density = calculate_density(image)
 
         images.append(copy.copy(image))
 
         if DEBUG:
-            print(f"Step: {step + 1}, Calculating Heights")
+            print(f"Step: {step + 1} :: Calculating Heights")
         image_sum += calculate_heights(image, 300)
 
         if DEBUG:
-            print(f"Step: {step + 1}, Size Upscaling")
+            print(f"Step: {step + 1} :: Size Upscaling")
         image_sum = bilinear_upscale(image_sum, int(image_sum.size * upscale_factor))
 
         if DEBUG:
-            print(f"Step: {step + 1}, Applying Blur")
+            print(f"Step: {step + 1} :: Applying Blur")
         image_sum = gaussian_blur(image_sum, smoothness)
 
         if DEBUG:
-            print(f"Step: {step + 1}, Crisp Upscaling")
+            print(f"Step: {step + 1} :: Crisp Upscaling")
         image = crisp_upscale(image, int(image.size * upscale_factor))
 
     return images + [image_sum]
@@ -905,8 +942,9 @@ def test():
         image.grid[7][5].weight = 30
         image.grid[7][5].struck = image.grid[6][5]
 
-    image_sum = image1 + image2
-    display_image(bilinear_upscale(image_sum, 100))
+    image1 = crisp_upscale(image1, 300)
+    image1 = jitter_contiguous_lines(image1)
+    display_image(image1)
 
 
 if __name__ == "__main__":
