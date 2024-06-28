@@ -210,8 +210,8 @@ class Image:
                 self.grid[x].append(Pixel(x, y))
 
         for edge in self.border.edges:
-            for p in edge:
-                self.grid[p[0]][p[1]].border = True
+            for point in edge:
+                self.grid[point[0]][point[1]].border = True
 
         queue = deque()
 
