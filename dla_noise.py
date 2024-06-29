@@ -1,15 +1,16 @@
+import cmath
 import copy
 import enum
-from typing import List, Self, Tuple, Optional, Dict
+import math
 import random
 import time
-from collections import deque, defaultdict
-import math
-import cmath
+from collections import defaultdict, deque
+from typing import Dict, List, Optional, Self, Tuple
+
+import matplotlib.pyplot as plt
 
 # External libraries only used for visualization
 import numpy as np
-import matplotlib.pyplot as plt
 
 DEBUG = True
 
@@ -263,6 +264,10 @@ class Image:
                     visited.add((neighbor_x, neighbor_y))
                     queue.append((neighbor_x, neighbor_y))
 
+    def __setitem__(self, index, value):
+        pixel = self[index]
+        pixel = value
+
     def __add__(self, other: Self) -> Self:
         new_image = Image(Border(self.border.border_points + other.border.border_points))
         for i in range(min(self.size, other.size)):
@@ -318,7 +323,7 @@ class Image:
         return True
 
 
-def constrain(value: int | float, low: int | float, high: int | float) -> int | float:
+def clamp(value: int | float, low: int | float, high: int | float) -> int | float:
     return max(low, min(high, value))
 
 
@@ -395,7 +400,7 @@ def graph(image: Image) -> Tuple[List[List[Optional[int]]], List[List[Optional[i
     return inbound_adjacency_list, outbound_adjacency_list
 
 
-def find_contiguous_line_segments(image: Image) -> Dict[int, Dict[str, Direction | List[int]]]:
+def find_line_segments(image: Image) -> Dict[int, Dict[str, Direction | List[int]]]:
     origin = [image.origin.x, image.origin.y, 0]
     inbound_adjacency_list, _ = graph(image)
 
@@ -492,7 +497,7 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
                 previous_x = path[-1][0]
                 previous_y = path[-1][1]
 
-                pixel = image.grid[previous_x][previous_y]
+                pixel: Pixel = image.grid[previous_x][previous_y]
                 pixel.struck = image.grid[x][y]
                 pixel.frozen = True
                 pixel.weight = 100
@@ -545,18 +550,39 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
     return new_image
 
 
-def jitter_contiguous_lines(image: Image) -> Image:
-    contiguous_line_segments = find_contiguous_line_segments(image)
+def jitter_lines(image: Image, jitter: int) -> Image:
+    new_image = Image(Border(image.border.border_points))
+    line_segments = find_line_segments(image)
 
-    for segment_id, segment_info in contiguous_line_segments.items():
+    for segment_id, segment_info in line_segments.items():
         start_x, start_y = segment_info["starts_at"]
         end_x, end_y = segment_info["ends_at"]
-        direction = segment_info["direction"]
 
         line_points = bresenham_line(start_x, start_y, end_x, end_y)
-        print(line_points)
 
-    return image
+        jittered_points = [(line_points[0][0], line_points[0][1], image[*line_points[0]].weight)]
+        for i in range(1, len(line_points) - 1):
+            x, y = line_points[i]
+            jitter_x = x + random.randint(-jitter, jitter)
+            jitter_y = y + random.randint(-jitter, jitter)
+            jittered_points.append((*image[jitter_x, jitter_y].coordinates, image[x, y].weight))
+        jittered_points.append((line_points[-1][0], line_points[-1][1], image[*line_points[-1]].weight))
+
+        for i in range(len(jittered_points) - 1):
+            jitter_start_x, jitter_start_y, jitter_start_weight = jittered_points[i]
+            jitter_end_x, jitter_end_y, jitter_end_weight = jittered_points[i + 1]
+            jitter_line_points = bresenham_line(jitter_start_x, jitter_start_y, jitter_end_x, jitter_end_y)
+            total_steps = len(jitter_line_points) - 1
+
+            for j, jitter_line_point in enumerate(jitter_line_points):
+                if total_steps > 0:
+                    interpolation_factor = j / total_steps
+                else:
+                    interpolation_factor = 0
+                new_weight = (1 - interpolation_factor) * jitter_start_weight + interpolation_factor * jitter_end_weight
+                new_image[*jitter_line_point].weight = new_weight
+
+    return new_image
 
 
 def calculate_heights(image: Image, clamp: int) -> Image:
@@ -631,9 +657,9 @@ def bilinear_upscale(image: Image, new_size_target: int) -> Image:
         y_difference = y - y_floor
 
         top_left_weight = image.grid[x_floor][y_floor].weight
-        top_right_weight = image.grid[constrain(x_floor + 1, 0, image.size - 1)][y_floor].weight
-        bottom_left_weight = image.grid[x_floor][constrain(y_floor + 1, 0, image.size - 1)].weight
-        bottom_right_weight = image.grid[constrain(x_floor + 1, 0, image.size - 1)][constrain(y_floor + 1, 0, image.size - 1)].weight
+        top_right_weight = image.grid[clamp(x_floor + 1, 0, image.size - 1)][y_floor].weight
+        bottom_left_weight = image.grid[x_floor][clamp(y_floor + 1, 0, image.size - 1)].weight
+        bottom_right_weight = image.grid[clamp(x_floor + 1, 0, image.size - 1)][clamp(y_floor + 1, 0, image.size - 1)].weight
 
         top_weight = top_right_weight * x_difference + top_left_weight * (1 - x_difference)
         bottom_weight = bottom_right_weight * x_difference + bottom_left_weight * (1 - x_difference)
@@ -666,8 +692,8 @@ def bicubic_upscale(image: Image, new_size_target: int) -> Image:
         result = 0
         for m in range(-1, 3):
             for n in range(-1, 3):
-                x_index = int(constrain(x_floor + m, 0, image.size - 1))
-                y_index = int(constrain(y_floor + n, 0, image.size - 1))
+                x_index = int(clamp(x_floor + m, 0, image.size - 1))
+                y_index = int(clamp(y_floor + n, 0, image.size - 1))
                 weight = image.grid[x_index][y_index].weight
                 result += weight * cubic(m - x_difference) * cubic(n - y_difference)
 
@@ -866,8 +892,8 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         images.append(copy.copy(image))
 
         if DEBUG:
-            print(f"Step: {step + 1} :: Calculating Heights")
-        image_sum += calculate_heights(image, 300)
+            print(f"Step: {step + 1} :: Calculating Heights and Jittering")
+        image_sum += jitter_lines(calculate_heights(image, 300), jitter_range)
 
         if DEBUG:
             print(f"Step: {step + 1} :: Size Upscaling")
@@ -903,7 +929,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=5, smoothness=4)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=10, smoothness=4)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
@@ -942,9 +968,8 @@ def test():
         image.grid[7][5].weight = 30
         image.grid[7][5].struck = image.grid[6][5]
 
-    image1 = crisp_upscale(image1, 300)
-    image1 = jitter_contiguous_lines(image1)
     display_image(image1)
+    display_image(image2)
 
 
 if __name__ == "__main__":
