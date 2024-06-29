@@ -366,6 +366,10 @@ def smooth_falloff(time_value: int | float, k: int | float) -> float:
     return 1 - (1 / (1 + k * time_value))
 
 
+def shifted_exponential(time_value: int | float, k: int | float, a: int | float) -> float:
+    return k ** (time_value - a)
+
+
 def calculate_density(image: Image) -> float:
     bounded_coordinates = image.bounded_coordinates()
     frozen_pixels = sum(image[x, y].frozen for x, y in bounded_coordinates)
@@ -585,7 +589,7 @@ def jitter_lines(image: Image, jitter: int) -> Image:
     return new_image
 
 
-def calculate_heights(image: Image, clamp: int) -> Image:
+def calculate_heights(image: Image, maximum_height: int, detail_falloff: float) -> Image:
     new_image = Image(Border(image.border.border_points))
 
     new_image.origin = new_image.grid[image.origin.x][image.origin.y]
@@ -623,6 +627,7 @@ def calculate_heights(image: Image, clamp: int) -> Image:
                 visited.append(next_node)
                 queue.append(next_node)
 
+    maximum_downstream_count = max(downstream_counts)
     for pixel_index, downstream_count in enumerate(downstream_counts):
         if downstream_count == 0:
             continue
@@ -632,7 +637,7 @@ def calculate_heights(image: Image, clamp: int) -> Image:
         pixel = new_image[x, y]
 
         pixel.frozen = True
-        pixel.weight = int(clamp * smooth_falloff(downstream_count, 0.05))
+        pixel.weight = maximum_height * shifted_exponential(downstream_count, detail_falloff, maximum_downstream_count)  # int(maximum_height * smooth_falloff(downstream_count, 0.005))
 
         if image[x, y].struck:
             pixel.struck = new_image[*image[x, y].struck.coordinates]
@@ -835,7 +840,7 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
     return new_image
 
 
-def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int, smoothness: int) -> List[Image]:
+def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int, detail_falloff: float, smoothness: int) -> List[Image]:
     images = []
 
     image = Image(Border.circle(initial_size))
@@ -893,11 +898,11 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
 
         if DEBUG:
             print(f"Step: {step + 1} :: Calculating Heights and Jittering")
-        image_sum += jitter_lines(calculate_heights(image, 300), jitter_range)
+        image_sum += jitter_lines(calculate_heights(image, 300, detail_falloff), jitter_range)
 
         if DEBUG:
             print(f"Step: {step + 1} :: Size Upscaling")
-        image_sum = bilinear_upscale(image_sum, int(image_sum.size * upscale_factor))
+        image_sum = bicubic_upscale(image_sum, int(image_sum.size * upscale_factor))
 
         if DEBUG:
             print(f"Step: {step + 1} :: Applying Blur")
@@ -929,14 +934,14 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, upscale_factor=2, jitter_range=10, smoothness=4)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=False, upscale_factor=2, jitter_range=2, detail_falloff=1.025, smoothness=3)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
 
     if DEBUG:
-        final_image = images[-1]
-        display_image(final_image)
+        for image in images:
+            display_image(image)
 
 
 def test():
@@ -968,9 +973,8 @@ def test():
         image.grid[7][5].weight = 30
         image.grid[7][5].struck = image.grid[6][5]
 
-    display_image(image1)
-    display_image(image2)
+    display_image(calculate_heights(crisp_upscale(image1, 500), 300))
 
 
 if __name__ == "__main__":
-    test()
+    main()
