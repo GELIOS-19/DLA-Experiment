@@ -7,9 +7,8 @@ import time
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Self, Tuple
 
-import matplotlib.pyplot as plt
-
 # External libraries only used for visualization
+import matplotlib.pyplot as plt
 import numpy as np
 
 DEBUG = True
