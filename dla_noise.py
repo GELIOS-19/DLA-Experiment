@@ -536,15 +536,14 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
                         line_pixel.frozen = True
                         line_pixel.weight = 1000
 
-                        # Chain the struck property
                         if i < len(line_points) - 1:
                             line_pixel.struck = new_image[*line_points[i + 1]]
-                        else:  # Connect the last gap pixel to the original pixel
+                        else:
                             line_pixel.struck = new_image[scaled_struck_x, scaled_struck_y]
 
-                pixel.struck = new_image[*line_points[-1]]  # TODO: THIS LINE MAKES 0 SENSE!!!! WHY?????????
+                pixel.struck = new_image[*line_points[-1]]
             else:
-                pixel.struck = new_image[scaled_struck_x, scaled_struck_y]  # TODO: ????????
+                pixel.struck = new_image[scaled_struck_x, scaled_struck_y]
 
         for node in inbound_adjacency_list[subject]:
             if (node, subject) not in bfs_visited:
