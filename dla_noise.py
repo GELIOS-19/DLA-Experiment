@@ -36,26 +36,6 @@ class Direction(enum.Enum):
     WEST = 7
 
 
-def perpendicular_direction(direction: Direction) -> Direction:
-    match direction:
-        case Direction.NORTH_WEST:
-            return Direction.SOUTH_WEST
-        case Direction.NORTH:
-            return Direction.EAST
-        case Direction.NORTH_EAST:
-            return Direction.SOUTH_EAST
-        case Direction.EAST:
-            return Direction.SOUTH
-        case Direction.SOUTH_EAST:
-            return Direction.NORTH_EAST
-        case Direction.SOUTH:
-            return Direction.WEST
-        case Direction.SOUTH_WEST:
-            return Direction.NORTH_WEST
-        case Direction.WEST:
-            return Direction.NORTH
-
-
 def bresenham_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
     x_difference = abs(final_x - initial_x)
     y_difference = abs(final_y - initial_y)
@@ -271,10 +251,6 @@ class Image:
                     visited.add((neighbor_x, neighbor_y))
                     queue.append((neighbor_x, neighbor_y))
 
-    def __setitem__(self, index, value):
-        pixel = self[index]
-        pixel = value
-
     def __add__(self, other: Self) -> Self:
         new_image = Image(Border(self.border.border_points + other.border.border_points))
         for i in range(min(self.size, other.size)):
@@ -404,6 +380,8 @@ def smooth_falloff(time_value: int | float, k: int | float) -> float:
     return 1 - (1 / (1 + k * time_value))
 
 
+# TODO: Maybe use this function instead of smooth falloff for different results
+#   We can calculate the maximum downstream count and use that for the 'a' value
 def shifted_exponential(time_value: int | float, k: int | float, a: int | float) -> float:
     return k ** (time_value - a)
 
@@ -965,16 +943,16 @@ def test():
         simulate_random_walk(image, 1, 100)
         image.density = calculate_density(image)
 
-    SCALE_FACTOR = 1.5
+    scale_factor = 1.5
 
     print(image.traversable())
-    u1 = crisp_upscale(image, int(image.size * SCALE_FACTOR))
+    u1 = crisp_upscale(image, int(image.size * scale_factor))
     print(u1.traversable())
-    u2 = calculate_heights(crisp_upscale(u1, int(u1.size * SCALE_FACTOR)), 300, 0)
+    u2 = calculate_heights(crisp_upscale(u1, int(u1.size * scale_factor)), 300, 0)
     print(u2.traversable())
-    u3 = crisp_upscale(u2, int(u2.size * SCALE_FACTOR))
+    u3 = crisp_upscale(u2, int(u2.size * scale_factor))
     print(u3.traversable())
-    u4 = crisp_upscale(u3, int(u3.size * SCALE_FACTOR))
+    u4 = crisp_upscale(u3, int(u3.size * scale_factor))
     print(u4.traversable())
 
     display_image(image)
