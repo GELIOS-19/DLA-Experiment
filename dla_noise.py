@@ -80,6 +80,79 @@ def bresenham_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -
     return line_points
 
 
+def wu_line(initial_x: int, initial_y: int, final_x: int, final_y: int) -> List[Tuple[int, int]]:
+    def plot(x, y):
+        line_points.append((x, y))
+
+    def ipart(x):
+        return int(x)
+
+    def round(x):
+        return ipart(x + 0.5)
+
+    def fpart(x):
+        return x - ipart(x)
+
+    def rfpart(x):
+        return 1 - fpart(x)
+
+    line_points = []
+
+    steep = abs(final_y - initial_y) > abs(final_x - initial_x)
+
+    if steep:
+        initial_x, initial_y = initial_y, initial_x
+        final_x, final_y = final_y, final_x
+
+    if initial_x > final_x:
+        initial_x, final_x = final_x, initial_x
+        initial_y, final_y = final_y, initial_y
+
+    dx = final_x - initial_x
+    dy = final_y - initial_y
+
+    gradient = dy / dx
+
+    x_end = round(initial_x)
+    y_end = initial_y + gradient * (x_end - initial_x)
+    xgap = rfpart(initial_x + 0.5)
+    x_pixel1 = x_end
+    y_pixel1 = ipart(y_end)
+    if steep:
+        plot(y_pixel1, x_pixel1)
+        plot(y_pixel1 + 1, x_pixel1)
+    else:
+        plot(x_pixel1, y_pixel1)
+        plot(x_pixel1, y_pixel1 + 1)
+
+    intery = y_end + gradient
+
+    x_end = round(final_x)
+    y_end = final_y + gradient * (x_end - final_x)
+    xgap = fpart(final_x + 0.5)
+    x_pixel2 = x_end
+    y_pixel2 = ipart(y_end)
+    if steep:
+        plot(y_pixel2, x_pixel2)
+        plot(y_pixel2 + 1, x_pixel2)
+    else:
+        plot(x_pixel2, y_pixel2)
+        plot(x_pixel2, y_pixel2 + 1)
+
+    if steep:
+        for x in range(x_pixel1 + 1, x_pixel2):
+            plot(ipart(intery), x)
+            plot(ipart(intery) + 1, x)
+            intery = intery + gradient
+    else:
+        for x in range(x_pixel1 + 1, x_pixel2):
+            plot(x, ipart(intery))
+            plot(x, ipart(intery) + 1)
+            intery = intery + gradient
+
+    return line_points
+
+
 class Border:
     border_points: List[List[int]]
     edges: List[List[Tuple[int, int]]]
@@ -180,6 +253,13 @@ class Pixel:
     def coordinates(self) -> Tuple[int, int]:
         return self.x, self.y
 
+    def get_id(self, image_size: int) -> int:
+        return self.x * image_size + self.y
+
+    @staticmethod
+    def get_coordinates_from_id(pixel_id: int, image_size: int) -> Tuple[int, int]:
+        return pixel_id // image_size, pixel_id % image_size
+
     @property
     def representative_weight(self):
         if self.border:
@@ -196,6 +276,7 @@ class Image:
     density: float
     grid: List[List[Pixel]]
     origin: Optional[Pixel]
+    weights: List[List[int | float]]
 
     def __init__(self, border: Border):
         self.border = border
@@ -275,51 +356,82 @@ class Image:
         return new_image
 
     @property
-    def weights(self) -> List[List[int | float]]:
-        weights = [[]] * self.size
+    def raw_weights(self) -> List[List[int | float]]:
+        raw_weights = []
         for i in range(self.size):
-            weights[i] = [pixel.weight for pixel in self.grid[i]]
-        return weights
+            raw_weights.append([])
+            for j in range(self.size):
+                raw_weights[i].append(self.grid[i][j].weight)
+        return raw_weights
+
+    @property
+    def representative_weights(self):
+        representative_weights = []
+        for i in range(self.size):
+            representative_weights.append([])
+            for j in range(self.size):
+                representative_weights[i].append(self.grid[j][i].representative_weight)
+        return representative_weights
 
     def bounded_coordinates(self) -> List[Tuple[int, int]]:
         return [(x, y) for y in range(self.size) for x in range(self.size) if not (self.grid[x][y].dead or self.grid[x][y].border)]
 
+    def graph(self):
+        inbound_adjacency_list = [[] for _ in range(self.size ** 2)]
+        outbound_adjacency_list = [[] for _ in range(self.size ** 2)]
+
+        bounded_coordinates = self.bounded_coordinates()
+        for x, y in bounded_coordinates:
+            pixel = self[x, y]
+            if pixel.frozen and pixel.struck:
+                inbound_adjacency_list[pixel.struck.x * self.size + pixel.struck.y].append(x * self.size + y)
+                outbound_adjacency_list[x * self.size + y].append(pixel.struck.x * self.size + pixel.struck.y)
+            elif not pixel.frozen:
+                inbound_adjacency_list[x * self.size + y].append(None)
+                outbound_adjacency_list[x * self.size + y].append(None)
+
+        for x in range(self.size):
+            for y in range(self.size):
+                if self.grid[x][y].dead or self.grid[x][y].border:
+                    inbound_adjacency_list[x * self.size + y].append(None)
+                    outbound_adjacency_list[x * self.size + y].append(None)
+
+        return inbound_adjacency_list, outbound_adjacency_list
+
     def traversable(self) -> bool:
-        def in_bounds(x, y):
-            return 0 <= x < self.size and 0 <= y < self.size
-
-        def breadth_first_search(start_pixel: Pixel, target_pixel: Pixel):
-            queue = [start_pixel]
-            visited = set()
-            visited.add((start_pixel.x, start_pixel.y))
-
-            while queue:
-                current_pixel = queue.pop(0)
-                if current_pixel == target_pixel:
-                    return True
-                for direction in GLOBAL_DIRECTIONS:
-                    nx, ny = (current_pixel.x + direction[0], current_pixel.y + direction[1])
-                    if in_bounds(nx, ny):
-                        neighbor = self.grid[nx][ny]
-                        if neighbor.frozen and (nx, ny) not in visited:
-                            visited.add((nx, ny))
-                            queue.append(neighbor)
+        if self.origin is None:
             return False
 
-        if not self.origin or not self.origin.frozen:
-            return False
+        inbound_adjacency_list, outbound_adjacency_list = self.graph()
+        leaves = []
 
-        frozen_pixels = [(x, y) for x in range(self.size) for y in range(self.size) if self.grid[x][y].frozen]
+        for index, (in_edges, out_edges) in enumerate(zip(inbound_adjacency_list, outbound_adjacency_list)):
+            if len(in_edges) == 0 and len(out_edges) != 0:
+                leaves.append(index)
+                self[*Pixel.get_coordinates_from_id(index, self.size)].weight = 200
 
-        if not frozen_pixels:
-            return False
+        reachable = []
+        for leaf in leaves:
+            dfs_visited = [leaf]
+            dfs_stack = [leaf]
 
-        origin_pixel = self.origin
-        for x, y in frozen_pixels:
-            if not breadth_first_search(self.grid[x][y], origin_pixel):
-                return False
+            dfs_depth = 1
+            while dfs_stack:
+                subject = dfs_stack.pop()
 
-        return True
+                if subject == self.origin.get_id(self.size):
+                    reachable.append(True)
+
+                self[*Pixel.get_coordinates_from_id(subject, self.size)].weight = dfs_depth + 10
+
+                for node in outbound_adjacency_list[subject]:
+                    if node not in dfs_visited:
+                        dfs_visited.append(node)
+                        dfs_stack.append(node)
+
+                dfs_depth += 1
+
+        return len(reachable) == len(leaves)
 
 
 def clamp(value: int | float, low: int | float, high: int | float) -> int | float:
@@ -376,36 +488,9 @@ def calculate_density(image: Image) -> float:
     return frozen_pixels / total_pixels
 
 
-def graph(image: Image) -> Tuple[List[List[Optional[int]]], List[List[Optional[int]]]]:
-    inbound_adjacency_list: List[List[Optional[int]]] = [[] for _ in range(image.size**2)]
-    for x, y in image.bounded_coordinates():
-        pixel = image[x, y]
-        if pixel.frozen and pixel.struck:
-            edges_index = pixel.struck.x * image.size + pixel.struck.y
-            inbound_adjacency_list[edges_index].append(x * image.size + y)
-        elif not pixel.frozen:
-            inbound_adjacency_list[x * image.size + y].append(None)
-
-    outbound_adjacency_list: List[List[Optional[int]]] = [[] for _ in range(image.size**2)]
-    for edges_index, edges in enumerate(inbound_adjacency_list):
-        for edge in edges:
-            if edge is not None:
-                outbound_adjacency_list[edge].append(edges_index)
-            else:
-                outbound_adjacency_list[edges_index].append(None)
-
-    for x in range(image.size):
-        for y in range(image.size):
-            if image.grid[x][y].dead or image.grid[x][y].border:
-                inbound_adjacency_list[x * image.size + y].append(None)
-                outbound_adjacency_list[x * image.size + y].append(None)
-
-    return inbound_adjacency_list, outbound_adjacency_list
-
-
 def find_line_segments(image: Image) -> Dict[int, Dict[str, Direction | List[int]]]:
     origin = [image.origin.x, image.origin.y, 0]
-    inbound_adjacency_list, _ = graph(image)
+    inbound_adjacency_list, _ = image.graph()
 
     visited = []
     stack = deque()
@@ -464,9 +549,6 @@ def find_line_segments(image: Image) -> Dict[int, Dict[str, Direction | List[int
             if node[2] in mappings.keys():
                 mappings[node[2]]["ends_at"] = node
 
-            if DEBUG:
-                print(node[2], is_intersection, is_direction_change_only, previous_direction, current_direction, subject, "->", node)
-
             visited.append(node)
             stack.append(node)
 
@@ -479,7 +561,7 @@ def find_line_segments(image: Image) -> Dict[int, Dict[str, Direction | List[int
     return dict(mappings)
 
 
-def simulate_random_walk(image: Image, num_concurrent_walkers: int):
+def simulate_random_walk(image: Image, num_concurrent_walkers: int, walks_per_concurrent_walker: int):
     walkers = []
     for walker in range(num_concurrent_walkers):
         edge = random.choice(image.border.edges)
@@ -493,20 +575,22 @@ def simulate_random_walk(image: Image, num_concurrent_walkers: int):
 
     while walkers:
         for i, path in enumerate(walkers):
-            direction = random.choice(GLOBAL_DIRECTIONS)
-            x, y = image[path[-1][0] + direction[0], path[-1][1] + direction[1]].coordinates
+            for _ in range(walks_per_concurrent_walker):
+                direction = random.choice(GLOBAL_DIRECTIONS)
+                x, y = image[path[-1][0] + direction[0], path[-1][1] + direction[1]].coordinates
 
-            if image.grid[x][y].frozen:
-                previous_x = path[-1][0]
-                previous_y = path[-1][1]
+                if image.grid[x][y].frozen:
+                    previous_x = path[-1][0]
+                    previous_y = path[-1][1]
 
-                pixel: Pixel = image.grid[previous_x][previous_y]
-                pixel.struck = image.grid[x][y]
-                pixel.frozen = True
-                pixel.weight = 100
-                walkers.pop(i)
+                    pixel: Pixel = image.grid[previous_x][previous_y]
+                    pixel.struck = image.grid[x][y]
+                    pixel.frozen = True
+                    pixel.weight = 100
+                    walkers.pop(i)
+                    break
 
-            path.append((x, y))
+                path.append((x, y))
 
     return walkers
 
@@ -515,41 +599,53 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
     new_image = Image(image.border.scale(new_size_target))
     scale_factor = new_image.size / image.size
 
-    new_image.origin = new_image.grid[int(image.origin.x * scale_factor)][int(image.origin.y * scale_factor)]
+    new_image.origin = new_image[int(image.origin.x * scale_factor), int(image.origin.y * scale_factor)]
 
-    for x, y in image.bounded_coordinates():
-        if image[x, y].frozen:
-            core_pixel = new_image[int(x * scale_factor), int(y * scale_factor)]  # SCARY
-            core_pixel.frozen = True
-            core_pixel.weight = 200
+    inbound_adjacency_list, _ = image.graph()
 
-    _, outbound_adjacency_list = graph(image)
-    for edges_index, edges in enumerate(outbound_adjacency_list):
-        if None not in edges:
-            initial_x = int((edges_index // image.size) * scale_factor)
-            initial_y = int((edges_index % image.size) * scale_factor)
+    bfs_visited = [(image.origin.get_id(image.size), None)]
+    bfs_queue = [(image.origin.get_id(image.size), None)]
 
-            for edge in edges:
-                final_x = int((edge // image.size) * scale_factor)
-                final_y = int((edge % image.size) * scale_factor)
+    while bfs_queue:
+        subject, parent = bfs_queue.pop()
 
-                line_points = bresenham_line(initial_x, initial_y, final_x, final_y)
-                for line_point_index, (line_point_x, line_point_y) in enumerate(line_points[:-1]):
-                    line_pixel = new_image[line_point_x, line_point_y]
-                    line_pixel.weight = 100 + 20 * line_point_index
-                    line_pixel.frozen = True
+        x, y = Pixel.get_coordinates_from_id(subject, image.size)
+        scaled_x = int(x * scale_factor)
+        scaled_y = int(y * scale_factor)
 
-                    next_point = line_points[line_point_index + 1]
-                    line_pixel.struck = new_image[next_point[0], next_point[1]]
+        pixel = new_image[scaled_x, scaled_y]
+        pixel.frozen = True
+        pixel.weight = 1000
+
+        if parent is not None:
+            struck_x, struck_y = Pixel.get_coordinates_from_id(parent, image.size)
+            scaled_struck_x = int(struck_x * scale_factor)
+            scaled_struck_y = int(struck_y * scale_factor)
+
+            line_points = bresenham_line(scaled_x, scaled_y, scaled_struck_x, scaled_struck_y)[1:-1]
+            if len(line_points) > 0:
+                for i, line_point in enumerate(line_points):
+                    line_pixel = new_image[*line_point]
+                    if not line_pixel.frozen:
+                        line_pixel.frozen = True
+                        line_pixel.weight = 1000
+
+                        # Chain the struck property
+                        if i < len(line_points) - 1:
+                            line_pixel.struck = new_image[*line_points[i + 1]]
+                        else:  # Connect the last gap pixel to the original pixel
+                            line_pixel.struck = new_image[scaled_struck_x, scaled_struck_y]
+
+                pixel.struck = new_image[*line_points[-1]]  # TODO: THIS LINE MAKES 0 SENSE!!!! WHY?????????
+            else:
+                pixel.struck = new_image[scaled_struck_x, scaled_struck_y]  # TODO: ????????
+
+        for node in inbound_adjacency_list[subject]:
+            if (node, subject) not in bfs_visited:
+                bfs_visited.append((node, subject))
+                bfs_queue.append((node, subject))
 
     new_image.density = calculate_density(new_image)
-
-    if DEBUG:
-        for x, y in image.bounded_coordinates():
-            pixel = new_image.grid[x][y]
-            if pixel.struck is not None:
-                print(f"({pixel.x}, {pixel.y}) -> ({pixel.struck.x}, {pixel.struck.y})")
-
     return new_image
 
 
@@ -588,61 +684,47 @@ def jitter_lines(image: Image, jitter: int) -> Image:
     return new_image
 
 
-def calculate_heights(image: Image, maximum_height: int, detail_falloff: float) -> Image:
+def calculate_heights(image: Image, maximum_height: int | float, detail_falloff: float) -> Image:
     new_image = Image(Border(image.border.border_points))
-
     new_image.origin = new_image.grid[image.origin.x][image.origin.y]
 
-    outbound_adjacency_list, _ = graph(image)
+    inbound_adjacency_list, outbound_adjacency_list = image.graph()
 
-    def count_downstream_pixels(index: int) -> int:
-        def depth_first_search(node, memo):
-            if node in memo:
-                return memo[node]
-            max_length = 0
-            for neighbor in outbound_adjacency_list[node]:
-                max_length = max(max_length, depth_first_search(neighbor, memo))
-            memo[node] = max_length + 1
-            return memo[node]
+    def get_downstream_count(index):
+        dfs_visited = [index]
+        dfs_stack = [index]
 
-        return depth_first_search(index, {})
+        dfs_depth = 1
+        while dfs_stack:
+            subject = dfs_stack.pop()
 
-    downstream_counts = [0 for _ in range(image.size**2)]
+            for node in inbound_adjacency_list[subject]:
+                if node not in dfs_visited:
+                    dfs_visited.append(node)
+                    dfs_stack.append(node)
 
-    origin = (image.origin.x, image.origin.y)
+            dfs_depth += 1
 
-    visited = [origin]
-    queue = [origin]
+        return dfs_depth
 
-    while queue:
-        subject = queue.pop(0)
-        subject_index = subject[0] * image.size + subject[1]
+    bfs_visited = [new_image.origin.get_id(new_image.size)]
+    bfs_queue = [new_image.origin.get_id(new_image.size)]
 
-        downstream_counts[subject_index] = count_downstream_pixels(subject_index)
+    while bfs_queue:
+        subject = bfs_queue.pop(0)
 
-        for node in outbound_adjacency_list[subject_index]:
-            next_node = (node // image.size, node % image.size)
-            if next_node not in visited:
-                visited.append(next_node)
-                queue.append(next_node)
-
-    maximum_downstream_count = max(downstream_counts)
-    for pixel_index, downstream_count in enumerate(downstream_counts):
-        if downstream_count == 0:
-            continue
-
-        x = pixel_index // image.size
-        y = pixel_index % image.size
-        pixel = new_image[x, y]
-
-        pixel.frozen = True
-        pixel.weight = maximum_height * shifted_exponential(downstream_count, detail_falloff, maximum_downstream_count)  # int(maximum_height * smooth_falloff(downstream_count, 0.005))
-
+        x, y = Pixel.get_coordinates_from_id(subject, new_image.size)
+        new_image[x, y].frozen = True
+        new_image[x, y].weight = maximum_height * smooth_falloff(get_downstream_count(subject), detail_falloff)
         if image[x, y].struck:
-            pixel.struck = new_image[*image[x, y].struck.coordinates]
+            new_image[x, y].struck = new_image[*image[x, y].struck.coordinates]
+
+        for node in inbound_adjacency_list[subject]:
+            if node not in bfs_visited:
+                bfs_visited.append(node)
+                bfs_queue.append(node)
 
     new_image.density = calculate_density(new_image)
-
     return new_image
 
 
@@ -822,8 +904,8 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
 
         return shifted_array
 
-    pad_to_size = nearest_power_of_two(max(len(image.weights), len(kernel)))
-    padded_weights = pad(image.weights, pad_to_size)
+    pad_to_size = nearest_power_of_two(max(len(image.raw_weights), len(kernel)))
+    padded_weights = pad(image.raw_weights, pad_to_size)
     padded_kernel = fft_shift(pad(kernel, pad_to_size))
 
     fft_weights = fft_2d(padded_weights)
@@ -839,7 +921,7 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
     return new_image
 
 
-def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, upscale_factor: float, jitter_range: int, detail_falloff: float, smoothness: int) -> List[Image]:
+def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int, jitter_range: int, height_goal: float, detail_falloff: float, smoothness: int) -> List[Image]:
     images = []
 
     image = Image(Border.circle(initial_size))
@@ -877,17 +959,17 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
             print(f"Step Density Threshold: {step_density_threshold}")
 
         while image.density < step_density_threshold:
-            count_concurrent_walkers: int
+            num_concurrent_walkers: int
             if use_concurrent_walkers:
                 total_pixels = image.size**2
                 frozen_pixels = image.density * total_pixels
-                count_concurrent_walkers = max(1, int((step_density_threshold * total_pixels) - frozen_pixels))
+                num_concurrent_walkers = max(1, int((step_density_threshold * total_pixels) - frozen_pixels))
             else:
-                count_concurrent_walkers = 1
+                num_concurrent_walkers = 1
 
             if DEBUG:
                 print(f"Step: {step + 1} :: Simulating Random Walk")
-            simulate_random_walk(image, count_concurrent_walkers)
+            simulate_random_walk(image, num_concurrent_walkers, walks_per_concurrent_walker)
 
             if DEBUG:
                 print(f"Step: {step + 1} :: Calculating Density")
@@ -896,8 +978,16 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         images.append(copy.copy(image))
 
         if DEBUG:
-            print(f"Step: {step + 1} :: Calculating Heights and Jittering")
-        image_sum += jitter_lines(calculate_heights(image, 300, detail_falloff), jitter_range)
+            print(f"Step: {step + 1} :: Calculating Heights")
+        image_with_height = calculate_heights(image, height_goal, detail_falloff)
+        images.append(copy.copy(image_with_height))
+
+        if DEBUG:
+            print(f"Step: {step + 1} :: Jittering")
+        image_with_jittered_lines = jitter_lines(image_with_height, jitter_range)
+        images.append(copy.copy(image_with_jittered_lines))
+
+        image_sum += image_with_jittered_lines
 
         if DEBUG:
             print(f"Step: {step + 1} :: Size Upscaling")
@@ -915,14 +1005,9 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
 
 
 def display_image(image: Image) -> None:
-    weights = []
-    for i in range(image.size):
-        weights.append([])
-        for j in range(image.size):
-            weights[i].append(image.grid[j][i].representative_weight)
-    weights = np.array(weights)
+    weights = np.array(image.representative_weights)
 
-    plt.imshow(weights, cmap="terrain", origin="lower")
+    plt.imshow(weights, cmap="gray", origin="lower")
     plt.colorbar(label="Weight")
     plt.title("Heightmap Based on 2D Array of Weights")
     plt.xlabel("X coordinate")
@@ -933,7 +1018,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=50, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=False, upscale_factor=2, jitter_range=2, detail_falloff=1.025, smoothness=3)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=2, jitter_range=10, height_goal=300, detail_falloff=0.005, smoothness=5)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
@@ -944,35 +1029,33 @@ def main():
 
 
 def test():
-    image1 = Image(Border.circle(10))
-    image2 = Image(Border.triangle(10))
+    # random.seed(0)
+    image = Image(Border.circle(100))
 
-    for image in (image1, image2):
-        image.origin = image.grid[5][5]
-        image.grid[5][5].frozen = True
-        image.grid[5][5].weight = 100
+    image[image.size // 2, image.size // 2].frozen = True
+    image.origin = image.grid[image.size // 2][image.size // 2]
+    while image.density < 0.1:
+        simulate_random_walk(image, 1, 100)
+        image.density = calculate_density(image)
 
-        image.grid[6][4].frozen = True
-        image.grid[6][4].weight = 50
-        image.grid[6][4].struck = image.grid[5][5]
+    SCALE_FACTOR = 1.5
 
-        image.grid[7][3].frozen = True
-        image.grid[7][3].weight = 40
-        image.grid[7][3].struck = image.grid[6][4]
+    print(image.traversable())
+    u1 = crisp_upscale(image, int(image.size * SCALE_FACTOR))
+    print(u1.traversable())
+    u2 = calculate_heights(crisp_upscale(u1, int(u1.size * SCALE_FACTOR)), 300, 0)
+    print(u2.traversable())
+    u3 = crisp_upscale(u2, int(u2.size * SCALE_FACTOR))
+    print(u3.traversable())
+    u4 = crisp_upscale(u3, int(u3.size * SCALE_FACTOR))
+    print(u4.traversable())
 
-        image.grid[5][3].frozen = True
-        image.grid[5][3].weight = 40
-        image.grid[5][3].struck = image.grid[6][4]
-
-        image.grid[6][5].frozen = True
-        image.grid[6][5].weight = 40
-        image.grid[6][5].struck = image.grid[6][4]
-
-        image.grid[7][5].frozen = True
-        image.grid[7][5].weight = 30
-        image.grid[7][5].struck = image.grid[6][5]
-
-    display_image(calculate_heights(crisp_upscale(image1, 500), 300))
+    display_image(image)
+    display_image(u1)
+    display_image(u2)
+    display_image(u3)
+    display_image(u4)
+    display_image(calculate_heights(u4, 300, 1.015))
 
 
 if __name__ == "__main__":
