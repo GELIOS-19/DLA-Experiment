@@ -900,17 +900,17 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
         standard_deviation,
     )
 
-    def pad(matrix, pada_to_size):
+    def pad(matrix, pad_to_size):
         if not matrix:
-            return [[0] * pada_to_size for _ in range(pada_to_size)]
+            return [[0] * pad_to_size for _ in range(pad_to_size)]
 
         rows = len(matrix)
         column = len(matrix[0])
 
-        start_row = (pada_to_size - rows) // 2
-        start_column = (pada_to_size - column) // 2
+        start_row = (pad_to_size - rows) // 2
+        start_column = (pad_to_size - column) // 2
 
-        padded_array = [[0] * pada_to_size for _ in range(pada_to_size)]
+        padded_array = [[0] * pad_to_size for _ in range(pad_to_size)]
 
         for i in range(rows):
             for j in range(column):
