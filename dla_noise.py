@@ -981,7 +981,7 @@ def test():
     print(image.traversable())
     u1 = crisp_upscale(image, int(image.size * scale_factor))
     print(u1.traversable())
-    u2 = calculate_heights(crisp_upscale(u1, int(u1.size * scale_factor)), 300, 0)
+    u2 = calculate_heights(crisp_upscale(u1, int(u1.size * scale_factor)), 300, falloff_mode="exponential", exponential_detail_falloff=2)
     print(u2.traversable())
     u3 = crisp_upscale(u2, int(u2.size * scale_factor))
     print(u3.traversable())
