@@ -158,13 +158,6 @@ class Pixel:
     def coordinates(self) -> Tuple[int, int]:
         return self.x, self.y
 
-    def get_id(self, image_size: int) -> int:
-        return self.x * image_size + self.y
-
-    @staticmethod
-    def get_coordinates_from_id(pixel_id: int, image_size: int) -> Tuple[int, int]:
-        return pixel_id // image_size, pixel_id % image_size
-
     @property
     def representative_weight(self):
         if self.border:
@@ -274,8 +267,32 @@ class Image:
                 representative_weights[i].append(self.grid[j][i].representative_weight)
         return representative_weights
 
+    @property
+    def normalized_weights(self):
+        maximum_weight = 0
+        raw_weights = self.raw_weights
+        for i in range(self.size):
+            for j in range(self.size):
+                if raw_weights[i][j] > maximum_weight:
+                    maximum_weight = raw_weights[i][j]
+
+        normalized_weights = []
+        for i in range(self.size):
+            normalized_weights.append([])
+            for j in range(self.size):
+                normalized_weights[i].append(self.grid[j][i].representative_weight / maximum_weight)
+
+        return normalized_weights
+
+
     def bounded_coordinates(self) -> List[Tuple[int, int]]:
         return [(x, y) for y in range(self.size) for x in range(self.size) if not (self.grid[x][y].dead or self.grid[x][y].border)]
+
+    def get_pixel_id_from_coordinates(self, x, y):
+        return x * self.size + y
+
+    def get_pixel_coordinates_from_id(self, pixel_id: int):
+        return pixel_id // self.size, pixel_id % self.size
 
     def graph(self) -> Tuple[List[List[int | None]], List[List[int | None]]]:
         inbound_adjacency_list: List[List[int | None]] = [[] for _ in range(self.size**2)]
@@ -309,7 +326,7 @@ class Image:
         for index, (in_edges, out_edges) in enumerate(zip(inbound_adjacency_list, outbound_adjacency_list)):
             if len(in_edges) == 0 and len(out_edges) != 0:
                 leaves.append(index)
-                self[*Pixel.get_coordinates_from_id(index, self.size)].weight = 200
+                self[*self.get_pixel_coordinates_from_id(index)].weight = 200
 
         reachable = []
         for leaf in leaves:
@@ -320,10 +337,10 @@ class Image:
             while dfs_stack:
                 subject = dfs_stack.pop()
 
-                if subject == self.origin.get_id(self.size):
+                if subject == self.get_pixel_id_from_coordinates(*self.origin.coordinates):
                     reachable.append(True)
 
-                self[*Pixel.get_coordinates_from_id(subject, self.size)].weight = dfs_depth + 10
+                self[*self.get_pixel_coordinates_from_id(subject)].weight = dfs_depth + 10
 
                 for node in outbound_adjacency_list[subject]:
                     if node not in dfs_visited:
@@ -509,13 +526,13 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
 
     inbound_adjacency_list, _ = image.graph()
 
-    bfs_visited: List[Tuple[int, Optional[int]]] = [(image.origin.get_id(image.size), None)]
-    bfs_queue: List[Tuple[int, Optional[int]]] = [(image.origin.get_id(image.size), None)]
+    bfs_visited: List[Tuple[int, Optional[int]]] = [(image.get_pixel_id_from_coordinates(*image.origin.coordinates), None)]
+    bfs_queue: List[Tuple[int, Optional[int]]] = [(image.get_pixel_id_from_coordinates(*image.origin.coordinates), None)]
 
     while bfs_queue:
         subject, parent = bfs_queue.pop()
 
-        x, y = Pixel.get_coordinates_from_id(subject, image.size)
+        x, y = image.get_pixel_coordinates_from_id(subject)
         scaled_x = int(x * scale_factor)
         scaled_y = int(y * scale_factor)
 
@@ -524,7 +541,7 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
         pixel.weight = 1000
 
         if parent is not None:
-            struck_x, struck_y = Pixel.get_coordinates_from_id(parent, image.size)
+            struck_x, struck_y = image.get_pixel_coordinates_from_id(parent)
             scaled_struck_x = int(struck_x * scale_factor)
             scaled_struck_y = int(struck_y * scale_factor)
 
@@ -616,14 +633,14 @@ def calculate_heights(image: Image, maximum_height: int | float, falloff_mode: s
 
         return dfs_depth
 
-    bfs_visited = [new_image.origin.get_id(new_image.size)]
-    bfs_queue = [new_image.origin.get_id(new_image.size)]
+    bfs_visited = [new_image.get_pixel_id_from_coordinates(*new_image.origin.coordinates)]
+    bfs_queue = [new_image.get_pixel_id_from_coordinates(*new_image.origin.coordinates)]
 
     downstream_counts = []
     while bfs_queue:
         subject = bfs_queue.pop(0)
 
-        x, y = Pixel.get_coordinates_from_id(subject, new_image.size)
+        x, y = new_image.get_pixel_coordinates_from_id(subject)
         new_image[x, y].frozen = True
         downstream_counts.append((subject, get_downstream_count(subject)))
         if image[x, y].struck:
@@ -637,7 +654,7 @@ def calculate_heights(image: Image, maximum_height: int | float, falloff_mode: s
 
     maximum_downstream_count = max(downstream_count for _, downstream_count in downstream_counts)
     for subject, downstream_count in downstream_counts:
-        x, y = Pixel.get_coordinates_from_id(subject, new_image.size)
+        x, y = new_image.get_pixel_coordinates_from_id(subject)
 
         if falloff_mode == "smooth":
             new_image[x, y].weight = maximum_height * smooth_falloff(downstream_count, 1 / (maximum_downstream_count / smooth_detail_falloff))
@@ -927,7 +944,7 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
 
 
 def display_image(image: Image) -> None:
-    weights = np.array(image.representative_weights)
+    weights = np.array(image.normalized_weights)
 
     plt.imshow(weights, cmap="gray", origin="lower")
     plt.colorbar(label="Weight")
@@ -940,7 +957,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=2, jitter_range=10, height_goal=300, smoothness=7, height_falloff_mode="exponential", exponential_detail_falloff=2)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=2, jitter_range=5, height_goal=3000, smoothness=10, height_falloff_mode="exponential", exponential_detail_falloff=2)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
@@ -961,7 +978,6 @@ def test():
         image.density = calculate_density(image)
 
     scale_factor = 1.5
-
     print(image.traversable())
     u1 = crisp_upscale(image, int(image.size * scale_factor))
     print(u1.traversable())
