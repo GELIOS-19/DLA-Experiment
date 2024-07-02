@@ -864,29 +864,11 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
     return new_image
 
 
-def distance_height(image: Image) -> Image:
-    new_image = Image(Border(image.border.border_points))
-
-    def calculate_distance(start_x, start_y, end_x, end_y):
-        return math.sqrt((start_x - end_x) ** 2 + (start_y - end_y) ** 2)
-
-    distances = []
-    origin_x, origin_y = image.origin.coordinates
-    for x, y in new_image.bounded_coordinates():
-        distances.append((new_image.get_pixel_id_from_coordinates(x, y), calculate_distance(x, y, origin_x, origin_y)))
-
-    maximum_distance = max(distance for _, distance in distances)
-    for index, distance in distances:
-        x, y = new_image.get_pixel_coordinates_from_id(index)
-        new_image[x, y].weight = (maximum_distance - distance) * 3
-
-    return new_image
-
-def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int, size_upscale_mode: str, jitter_range: int, height_goal: float, smoothness: int, height_falloff_mode: str = "exponential", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> List[Image]:
+def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int, size_upscale_mode: str, jitter_range: int, height_goal: float, minimum_blur: int | float, maximum_blur: int | float, height_falloff_mode: str = "exponential", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> List[Image]:
     images = []
 
-    image = Image(Border.circle(initial_size))
-    image_sum = Image(Border.circle(initial_size))
+    image = Image(Border.triangle(initial_size))
+    image_sum = Image(Border.triangle(initial_size))
 
     random.seed(seed)
 
@@ -943,12 +925,15 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         image_with_height = calculate_heights(image, height_goal, falloff_mode=height_falloff_mode, smooth_detail_falloff=smooth_detail_falloff, exponential_detail_falloff=exponential_detail_falloff)
         images.append(copy.copy(image_with_height))
 
-        if DEBUG:
-            print(f"Step: {step + 1} :: Jittering")
-        image_with_jittered_lines = jitter_lines(image_with_height, jitter_range)
-        images.append(copy.copy(image_with_jittered_lines))
+        if jitter_range != 0:
+            if DEBUG:
+                print(f"Step: {step + 1} :: Jittering")
+            image_with_jittered_lines = jitter_lines(image_with_height, jitter_range)
+            images.append(copy.copy(image_with_jittered_lines))
 
-        image_sum += image_with_jittered_lines
+            image_sum += image_with_jittered_lines
+        else:
+            image_sum += image_with_height
 
         if DEBUG:
             print(f"Step: {step + 1} :: Size Upscaling")
@@ -960,16 +945,18 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
         else:
             raise ValueError(f"Unknown size upscale mode {size_upscale_mode}")
 
-        if DEBUG:
-            print(f"Step: {step + 1} :: Crisp Upscaling")
-        image = crisp_upscale(image, int(image.size * upscale_factor))
+        if step < steps - 1:
+            if DEBUG:
+                print(f"Step: {step + 1} :: Crisp Upscaling")
+            image = crisp_upscale(image, int(image.size * upscale_factor))
 
         if DEBUG:
             print(f"Step: {step + 1} :: Applying Blur")
-        image_sum = gaussian_blur(image_sum, smoothness)
 
-        if step == steps - 1:
-            image_sum += distance_height(image) # TODO: Replace this with worley noise
+        for point in curve:
+            if abs(step - point[0]) < 0.001:
+                step_blur = (maximum_blur * point[1]) + minimum_blur
+        image_sum = gaussian_blur(image_sum, step_blur)
 
     return images + [image_sum]
 
@@ -988,7 +975,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=2, size_upscale_mode="bilinear", jitter_range=0, height_goal=3000, smoothness=8, height_falloff_mode="smooth", smooth_detail_falloff=15)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=1, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=1.5, size_upscale_mode="bilinear", jitter_range=1, height_goal=1000, minimum_blur=7, maximum_blur=30, height_falloff_mode="smooth", smooth_detail_falloff=70)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
@@ -1000,7 +987,7 @@ def main():
 
 def test():
     # random.seed(0)
-    image = Image(Border.triangle(100))
+    image = Image(Border.circle(100))
 
     image[image.size // 2, image.size // 2].frozen = True
     image.origin = image.grid[image.size // 2][image.size // 2]
@@ -1019,14 +1006,12 @@ def test():
     u4 = crisp_upscale(u3, int(u3.size * scale_factor))
     # print(u4.traversable())
 
-    # display_image(image)
-    # display_image(u1)
-    # display_image(u2)
-    # display_image(u3)
-    # display_image(u4)
-    # display_image(calculate_heights(u4, 300, falloff_mode="exponential", exponential_detail_falloff=2))
-
-    display_image(calculate_heights(image, 3000, smooth_detail_falloff=15) + distance_height(image))
+    display_image(image)
+    display_image(u1)
+    display_image(u2)
+    display_image(u3)
+    display_image(u4)
+    display_image(calculate_heights(u4, 300, falloff_mode="exponential", exponential_detail_falloff=2))
 
 
 if __name__ == "__main__":
