@@ -657,8 +657,12 @@ def calculate_heights(image: Image, maximum_height: int | float, falloff_mode: s
         x, y = new_image.get_pixel_coordinates_from_id(subject)
 
         if falloff_mode == "smooth":
+            if not smooth_detail_falloff:
+                raise ValueError("Must set value for 'smooth_detail_falloff'")
             new_image[x, y].weight = maximum_height * smooth_falloff(downstream_count, 1 / (maximum_downstream_count / smooth_detail_falloff))
         elif falloff_mode == "exponential":
+            if not exponential_detail_falloff:
+                raise ValueError("Must set value for 'exponential_detail_falloff'")
             new_image[x, y].weight = maximum_height * shifted_exponential(downstream_count, (exponential_detail_falloff / maximum_downstream_count) + 1, maximum_downstream_count)
         else:
             raise ValueError(f"Invalid falloff mode {falloff_mode}, must be 'smooth' or 'exponential'")
@@ -860,7 +864,7 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
     return new_image
 
 
-def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int, jitter_range: int, height_goal: float, smoothness: int, height_falloff_mode: str = "exponential", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> List[Image]:
+def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int, size_upscale_mode: str, jitter_range: int, height_goal: float, smoothness: int, height_falloff_mode: str = "exponential", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> List[Image]:
     images = []
 
     image = Image(Border.circle(initial_size))
@@ -930,7 +934,13 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
 
         if DEBUG:
             print(f"Step: {step + 1} :: Size Upscaling")
-        image_sum = bicubic_upscale(image_sum, int(image_sum.size * upscale_factor))
+
+        if size_upscale_mode == "bilinear":
+            image_sum = bilinear_upscale(image_sum, int(image_sum.size * upscale_factor))
+        elif size_upscale_mode == "bicubic":
+            image_sum = bicubic_upscale(image_sum, int(image_sum.size * upscale_factor))
+        else:
+            raise ValueError(f"Unknown size upscale mode {size_upscale_mode}")
 
         if DEBUG:
             print(f"Step: {step + 1} :: Applying Blur")
@@ -957,7 +967,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=2, jitter_range=5, height_goal=3000, smoothness=10, height_falloff_mode="exponential", exponential_detail_falloff=2)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=2, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=2, size_upscale_mode="bilinear", jitter_range=0, height_goal=3000, smoothness=15, height_falloff_mode="smooth", smooth_detail_falloff=15)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
