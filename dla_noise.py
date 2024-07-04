@@ -7,6 +7,8 @@ import time
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Self, Tuple
 
+import cv2
+
 # External libraries only used for visualization
 import matplotlib.pyplot as plt
 import numpy as np
@@ -276,6 +278,7 @@ class Image:
                 if raw_weights[i][j] > maximum_weight:
                     maximum_weight = raw_weights[i][j]
 
+        maximum_weight = max(maximum_weight, 1)
         normalized_weights = []
         for i in range(self.size):
             normalized_weights.append([])
@@ -398,6 +401,110 @@ def smooth_falloff(time_value: int | float, k: int | float) -> float:
 
 def shifted_exponential(time_value: int | float, k: int | float, a: int | float) -> float:
     return k ** (time_value - a)
+
+
+def convolve_2d(matrix, kernel):
+    def pad(matrix, pad_to_size):
+        if not matrix:
+            return [[0] * pad_to_size for _ in range(pad_to_size)]
+
+        rows = len(matrix)
+        column = len(matrix[0])
+
+        start_row = (pad_to_size - rows) // 2
+        start_column = (pad_to_size - column) // 2
+
+        padded_array = [[0] * pad_to_size for _ in range(pad_to_size)]
+
+        for i in range(rows):
+            for j in range(column):
+                padded_array[start_row + i][start_column + j] = matrix[i][j]
+
+        return padded_array
+
+    def crop(matrix, original_rows, original_columns):
+        size = len(matrix)
+
+        start_row = (size - original_rows) // 2
+        start_column = (size - original_columns) // 2
+
+        cropped_array = [matrix[start_row + i][start_column : start_column + original_columns] for i in range(original_rows)]
+
+        return cropped_array
+
+    def nearest_power_of_two(number):
+        return 1 << (number - 1).bit_length()
+
+    def fast_fourier_transform(polynomial_coefficients):
+        polynomial_length = len(polynomial_coefficients)
+        if polynomial_length <= 1:
+            return polynomial_coefficients
+
+        even_degree_terms = fast_fourier_transform(polynomial_coefficients[0::2])
+        odd_degree_terms = fast_fourier_transform(polynomial_coefficients[1::2])
+
+        twiddle_factors = [cmath.exp(-2j * cmath.pi * k / polynomial_length) * odd_degree_terms[k % len(odd_degree_terms)] for k in range(polynomial_length // 2)]
+        return [even_degree_terms[k] + twiddle_factors[k] for k in range(polynomial_length // 2)] + [even_degree_terms[k] - twiddle_factors[k] for k in range(polynomial_length // 2)]
+
+    def inverse_fast_fourier_transform(polynomial_values):
+        polynomial_length = len(polynomial_values)
+        if polynomial_length <= 1:
+            return polynomial_values
+
+        even_degree_terms = inverse_fast_fourier_transform(polynomial_values[0::2])
+        odd_degree_terms = inverse_fast_fourier_transform(polynomial_values[1::2])
+
+        twiddle_factors = [cmath.exp(2j * cmath.pi * k / polynomial_length) * odd_degree_terms[k % len(odd_degree_terms)] for k in range(polynomial_length // 2)]
+        return [(even_degree_terms[k] + twiddle_factors[k]) / 2 for k in range(polynomial_length // 2)] + [(even_degree_terms[k] - twiddle_factors[k]) / 2 for k in range(polynomial_length // 2)]
+
+    def fft_2d(matrix):
+        fft_rows = [fast_fourier_transform(row) for row in matrix]
+        transpose = list(zip(*fft_rows))
+        fft_columns = [fast_fourier_transform(column) for column in transpose]
+        return list(column for column in zip(*fft_columns))
+
+    def ifft_2d(matrix):
+        ifft_rows = [inverse_fast_fourier_transform(row) for row in matrix]
+        transpose = list(zip(*ifft_rows))
+        ifft_columns = [inverse_fast_fourier_transform(column) for column in transpose]
+        return list(zip(*ifft_columns))
+
+    def elementwise_matrix_multiplication(matrix_a, matrix_b):
+        return [[matrix_a[i][j] * matrix_b[i][j] for j in range(len(matrix_a[0]))] for i in range(len(matrix_a))]
+
+    def fft_shift(array):
+        rows = len(array)
+        columns = len(array[0])
+        middle_row = rows // 2
+        middle_column = columns // 2
+
+        shifted_array = [[0] * columns for _ in range(rows)]
+
+        for i in range(rows):
+            for j in range(columns):
+                new_i = (i + middle_row) % rows
+                new_j = (j + middle_column) % columns
+                shifted_array[new_i][new_j] = array[i][j]
+
+        return shifted_array
+
+    pad_to_size = nearest_power_of_two(max(len(matrix), len(kernel)))
+    padded_matrix = pad(matrix, pad_to_size)
+    padded_kernel = fft_shift(pad(kernel, pad_to_size))
+
+    fft_matrix = fft_2d(padded_matrix)
+    fft_kernel = fft_2d(padded_kernel)
+    fft_product = elementwise_matrix_multiplication(fft_matrix, fft_kernel)
+
+    convolved_matrix = ifft_2d(fft_product)
+    result = crop(convolved_matrix, len(matrix), len(matrix))
+
+    real_result = [[0 for _ in range(len(result))] for _ in range(len(result))]
+    for i in range(len(result)):
+        for j in range(len(result)):
+            real_result[i][j] = result[i][j].real
+
+    return real_result
 
 
 def calculate_density(image: Image) -> float:
@@ -558,7 +665,7 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
                         else:
                             line_pixel.struck = new_image[scaled_struck_x, scaled_struck_y]
 
-                pixel.struck = new_image[*line_points[-1]]
+                pixel.struck = new_image[*line_points[-1]]  # -1
             else:
                 pixel.struck = new_image[scaled_struck_x, scaled_struck_y]
 
@@ -763,106 +870,42 @@ def gaussian_blur(image: Image, standard_deviation: int | float) -> Image:
     kernel_base_size = round(6 * standard_deviation)
     kernel = create_kernel((kernel_base_size if kernel_base_size % 2 == 1 else kernel_base_size + 1), standard_deviation)
 
-    def pad(matrix, pad_to_size):
-        if not matrix:
-            return [[0] * pad_to_size for _ in range(pad_to_size)]
-
-        rows = len(matrix)
-        column = len(matrix[0])
-
-        start_row = (pad_to_size - rows) // 2
-        start_column = (pad_to_size - column) // 2
-
-        padded_array = [[0] * pad_to_size for _ in range(pad_to_size)]
-
-        for i in range(rows):
-            for j in range(column):
-                padded_array[start_row + i][start_column + j] = matrix[i][j]
-
-        return padded_array
-
-    def crop(matrix, original_rows, original_columns):
-        size = len(matrix)
-
-        start_row = (size - original_rows) // 2
-        start_column = (size - original_columns) // 2
-
-        cropped_array = [matrix[start_row + i][start_column : start_column + original_columns] for i in range(original_rows)]
-
-        return cropped_array
-
-    def nearest_power_of_two(number):
-        return 1 << (number - 1).bit_length()
-
-    def fast_fourier_transform(polynomial_coefficients):
-        polynomial_length = len(polynomial_coefficients)
-        if polynomial_length <= 1:
-            return polynomial_coefficients
-
-        even_degree_terms = fast_fourier_transform(polynomial_coefficients[0::2])
-        odd_degree_terms = fast_fourier_transform(polynomial_coefficients[1::2])
-
-        twiddle_factors = [cmath.exp(-2j * cmath.pi * k / polynomial_length) * odd_degree_terms[k % len(odd_degree_terms)] for k in range(polynomial_length // 2)]
-        return [even_degree_terms[k] + twiddle_factors[k] for k in range(polynomial_length // 2)] + [even_degree_terms[k] - twiddle_factors[k] for k in range(polynomial_length // 2)]
-
-    def inverse_fast_fourier_transform(polynomial_values):
-        polynomial_length = len(polynomial_values)
-        if polynomial_length <= 1:
-            return polynomial_values
-
-        even_degree_terms = inverse_fast_fourier_transform(polynomial_values[0::2])
-        odd_degree_terms = inverse_fast_fourier_transform(polynomial_values[1::2])
-
-        twiddle_factors = [cmath.exp(2j * cmath.pi * k / polynomial_length) * odd_degree_terms[k % len(odd_degree_terms)] for k in range(polynomial_length // 2)]
-        return [(even_degree_terms[k] + twiddle_factors[k]) / 2 for k in range(polynomial_length // 2)] + [(even_degree_terms[k] - twiddle_factors[k]) / 2 for k in range(polynomial_length // 2)]
-
-    def fft_2d(matrix):
-        fft_rows = [fast_fourier_transform(row) for row in matrix]
-        transpose = list(zip(*fft_rows))
-        fft_columns = [fast_fourier_transform(column) for column in transpose]
-        return list(column for column in zip(*fft_columns))
-
-    def ifft_2d(matrix):
-        ifft_rows = [inverse_fast_fourier_transform(row) for row in matrix]
-        transpose = list(zip(*ifft_rows))
-        ifft_columns = [inverse_fast_fourier_transform(column) for column in transpose]
-        return list(zip(*ifft_columns))
-
-    def elementwise_matrix_multiplication(matrix_a, matrix_b):
-        return [[matrix_a[i][j] * matrix_b[i][j] for j in range(len(matrix_a[0]))] for i in range(len(matrix_a))]
-
-    def fft_shift(array):
-        rows = len(array)
-        columns = len(array[0])
-        middle_row = rows // 2
-        middle_column = columns // 2
-
-        shifted_array = [[0] * columns for _ in range(rows)]
-
-        for i in range(rows):
-            for j in range(columns):
-                new_i = (i + middle_row) % rows
-                new_j = (j + middle_column) % columns
-                shifted_array[new_i][new_j] = array[i][j]
-
-        return shifted_array
-
-    pad_to_size = nearest_power_of_two(max(len(image.raw_weights), len(kernel)))
-    padded_weights = pad(image.raw_weights, pad_to_size)
-    padded_kernel = fft_shift(pad(kernel, pad_to_size))
-
-    fft_weights = fft_2d(padded_weights)
-    fft_kernel = fft_2d(padded_kernel)
-    fft_product = elementwise_matrix_multiplication(fft_weights, fft_kernel)
-
-    convolved_image = ifft_2d(fft_product)
-    blurred_weights = crop(convolved_image, image.size, image.size)
+    blurred_weights = convolve_2d(image.raw_weights, kernel)
 
     for i, j in new_image.bounded_coordinates():
         new_image[i, j].weight = blurred_weights[i][j].real
 
     return new_image
 
+# TODO: Fix this Function and remove opencv dependency
+#   Implement multiple point attractors
+#   Implement inverse DLA where walkers are attracted to the edges of the image, this may form
+#   dendritic patterns
+def morphological_erosion(image: Image, iterations: int) -> Image:
+    new_image = Image(Border(image.border.border_points))
+    new_image_weights = image.normalized_weights
+
+    print("0")
+    cv_image = cv2.normalize(np.array(new_image_weights), None, 0, 255, cv2.NORM_MINMAX)
+
+    print("1")
+    for i in range(len(new_image_weights)):
+        for j in range(len(new_image_weights)):
+            cv_image[i, j] = new_image_weights[i][j]
+
+    print("2")
+    eroded_image = cv2.erode(cv_image, None, iterations=5)
+
+    cv2.imshow("e", eroded_image)
+    cv2.waitKey(0)
+
+    print("3")
+    weights = eroded_image.astype(float)
+    for i in range(len(weights)):
+        for j in range(len(weights)):
+            new_image.grid[i][j].weight = weights[i][j]
+
+    return new_image
 
 def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int, size_upscale_mode: str, jitter_range: int, height_goal: float, minimum_blur: int | float, maximum_blur: int | float, height_falloff_mode: str = "exponential", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> List[Image]:
     images = []
@@ -950,13 +993,14 @@ def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_densit
                 print(f"Step: {step + 1} :: Crisp Upscaling")
             image = crisp_upscale(image, int(image.size * upscale_factor))
 
+        step_blur = maximum_blur * (-(1 / steps) * (step - steps)) + minimum_blur
         if DEBUG:
-            print(f"Step: {step + 1} :: Applying Blur")
-
-        for point in curve:
-            if abs(step - point[0]) < 0.001:
-                step_blur = (maximum_blur * point[1]) + minimum_blur
+            print(f"Step: {step + 1} :: Applying Blur, Step Blur: {step_blur}")
         image_sum = gaussian_blur(image_sum, step_blur)
+
+    if DEBUG:
+        print(f"Eroding Image")
+    image_sum = morphological_erosion(image_sum, 1)
 
     return images + [image_sum]
 
@@ -975,7 +1019,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=1, density_falloff_bias=1 / 2, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=1.5, size_upscale_mode="bilinear", jitter_range=1, height_goal=1000, minimum_blur=7, maximum_blur=30, height_falloff_mode="smooth", smooth_detail_falloff=70)
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.1, density_falloff_extremity=1, density_falloff_bias=2 / 3, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=1.5, size_upscale_mode="bilinear", jitter_range=0, height_goal=1000, minimum_blur=3, maximum_blur=50, height_falloff_mode="smooth", smooth_detail_falloff=35)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
