@@ -372,9 +372,7 @@ def clamp(value: int | float, low: int | float, high: int | float) -> int | floa
 
 def bezier_sigmoid(length, slope, curve_point, precision=10000):
     def bezier_curve(time_value, control_point_0, control_point_1, control_point_2, control_point_3):
-        return (1 - time_value) ** 3 * control_point_0[0] + 3 * (1 - time_value) ** 2 * time_value * control_point_1[0] + 3 * (1 - time_value) * time_value**2 * control_point_2[0] + time_value**3 * control_point_3[0], (1 - time_value) ** 3 * control_point_0[1] + 3 * (1 - time_value) ** 2 * time_value * control_point_1[
-            1
-        ] + 3 * (1 - time_value) * time_value**2 * control_point_2[1] + time_value**3 * control_point_3[1]
+        return (1 - time_value) ** 3 * control_point_0[0] + 3 * (1 - time_value) ** 2 * time_value * control_point_1[0] + 3 * (1 - time_value) * time_value**2 * control_point_2[0] + time_value**3 * control_point_3[0], (1 - time_value) ** 3 * control_point_0[1] + 3 * (1 - time_value) ** 2 * time_value * control_point_1[1] + 3 * (1 - time_value) * time_value**2 * control_point_2[1] + time_value**3 * control_point_3[1]
 
     def vertical_line_test(points):
         time_value = 0
@@ -910,7 +908,7 @@ def create_dla_noise(
     density_falloff_bias: float,
     use_concurrent_walkers: bool,
     walks_per_concurrent_walker: int,
-    upscale_factor: int,
+    upscale_factor: int | float,
     size_upscale_mode: str,
     jitter_range: int,
     height_goal: float,
