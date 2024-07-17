@@ -119,18 +119,7 @@ class Border:
 
     @staticmethod
     def hexagon(size):
-        return Border(
-            [
-                [(size // 3), 0],
-                [(size // 3) * 2, 0],
-                [(size // 3), size],
-                [(size // 3) * 2, size],
-                [0, (size // 3)],
-                [0, (size // 3) * 2],
-                [size, (size // 3)],
-                [size, (size // 3) * 2],
-            ]
-        )
+        return Border([[(size // 3), 0], [(size // 3) * 2, 0], [(size // 3), size], [(size // 3) * 2, size], [0, (size // 3)], [0, (size // 3) * 2], [size, (size // 3)], [size, (size // 3) * 2]])
 
     @staticmethod
     def circle(size):
@@ -725,13 +714,7 @@ def jitter_lines(image: Image, jitter: int) -> Image:
     return new_image
 
 
-def calculate_heights(
-    image: Image,
-    maximum_height: int | float,
-    falloff_mode: str = "smooth",
-    smooth_detail_falloff: Optional[int | float] = None,
-    exponential_detail_falloff: Optional[int | float] = None,
-) -> Image:
+def calculate_heights(image: Image, maximum_height: int | float, falloff_mode: str = "smooth", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> Image:
     assert image.origin is not None
 
     new_image = Image(Border(image.border.border_points))
@@ -899,25 +882,7 @@ def iterative_pseudo_erosion(image: Image, iterations: int) -> Image:
     return image
 
 
-def create_dla_noise(
-    seed: int,
-    initial_size: int,
-    end_size: int,
-    initial_density_threshold: float,
-    density_falloff_extremity: float,
-    density_falloff_bias: float,
-    use_concurrent_walkers: bool,
-    walks_per_concurrent_walker: int,
-    upscale_factor: int | float,
-    size_upscale_mode: str,
-    jitter_range: int,
-    height_goal: float,
-    minimum_blur: int | float,
-    maximum_blur: int | float,
-    height_falloff_mode: str = "exponential",
-    smooth_detail_falloff: Optional[int | float] = None,
-    exponential_detail_falloff: Optional[int | float] = None,
-) -> List[Image]:
+def create_dla_noise(seed: int, initial_size: int, end_size: int, initial_density_threshold: float, density_falloff_extremity: float, density_falloff_bias: float, use_concurrent_walkers: bool, walks_per_concurrent_walker: int, upscale_factor: int | float, size_upscale_mode: str, jitter_range: int, height_goal: float, minimum_blur: int | float, maximum_blur: int | float, height_falloff_mode: str = "exponential", smooth_detail_falloff: Optional[int | float] = None, exponential_detail_falloff: Optional[int | float] = None) -> List[Image]:
     images = []
 
     image = Image(Border.circle(initial_size))
@@ -1029,24 +994,7 @@ def display_image(image: Image) -> None:
 def main():
     start_time = time.time()
 
-    images = create_dla_noise(
-        seed=random.randint(0, 1000),
-        initial_size=100,
-        end_size=1000,
-        initial_density_threshold=0.2,
-        density_falloff_extremity=1,
-        density_falloff_bias=2 / 3,
-        use_concurrent_walkers=True,
-        walks_per_concurrent_walker=100,
-        upscale_factor=1.5,
-        size_upscale_mode="bilinear",
-        jitter_range=0,
-        height_goal=1000,
-        minimum_blur=3,
-        maximum_blur=25,
-        height_falloff_mode="smooth",
-        smooth_detail_falloff=75,
-    )
+    images = create_dla_noise(seed=random.randint(0, 1000), initial_size=100, end_size=1000, initial_density_threshold=0.2, density_falloff_extremity=1, density_falloff_bias=2 / 3, use_concurrent_walkers=True, walks_per_concurrent_walker=100, upscale_factor=1.5, size_upscale_mode="bilinear", jitter_range=0, height_goal=1000, minimum_blur=3, maximum_blur=25, height_falloff_mode="smooth", smooth_detail_falloff=75)
 
     end_time = time.time()
     print(f"Image generation time: {end_time - start_time} seconds")
