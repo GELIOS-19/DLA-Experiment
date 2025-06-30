@@ -179,7 +179,10 @@ class Border:
         scale_factor = new_size / self.size
         return Border(
             [
-                [int(p[0] * scale_factor), int(p[1] * scale_factor)]
+                [
+                    int(p[0] * scale_factor),
+                    int(p[1] * scale_factor),
+                ]
                 for p in self.border_points
             ]
         )
@@ -293,7 +296,10 @@ class Image:
                 return self.grid[current_x][current_y]
 
             for neighbor_x, neighbor_y in [
-                (current_x + direction[0], current_y + direction[1])
+                (
+                    current_x + direction[0],
+                    current_y + direction[1],
+                )
                 for direction in GLOBAL_DIRECTIONS
             ]:
                 if (
@@ -307,13 +313,15 @@ class Image:
     def __add__(self, other: Self) -> 'Image':
         new_image = Image(
             Border(
-                self.border.border_points + other.border.border_points
+                self.border.border_points
+                + other.border.border_points
             )
         )
         for i in range(min(self.size, other.size)):
             for j in range(min(self.size, other.size)):
                 new_image.grid[i][j].weight = (
-                    self.grid[i][j].weight + other.grid[i][j].weight
+                    self.grid[i][j].weight
+                    + other.grid[i][j].weight
                 )
         return new_image
 
@@ -393,7 +401,9 @@ class Image:
                     pixel.struck.x * self.size + pixel.struck.y
                 )
             elif not pixel.frozen:
-                inbound_adjacency_list[x * self.size + y].append(None)
+                inbound_adjacency_list[x * self.size + y].append(
+                    None
+                )
                 outbound_adjacency_list[x * self.size + y].append(
                     None
                 )
@@ -401,12 +411,12 @@ class Image:
         for x in range(self.size):
             for y in range(self.size):
                 if self.grid[x][y].dead or self.grid[x][y].border:
-                    inbound_adjacency_list[x * self.size + y].append(
-                        None
-                    )
-                    outbound_adjacency_list[x * self.size + y].append(
-                        None
-                    )
+                    inbound_adjacency_list[
+                        x * self.size + y
+                    ].append(None)
+                    outbound_adjacency_list[
+                        x * self.size + y
+                    ].append(None)
 
         return inbound_adjacency_list, outbound_adjacency_list
 
@@ -414,7 +424,9 @@ class Image:
         if self.origin is None:
             return False
 
-        inbound_adjacency_list, outbound_adjacency_list = self.graph()
+        inbound_adjacency_list, outbound_adjacency_list = (
+            self.graph()
+        )
         leaves = []
 
         for index, (in_edges, out_edges) in enumerate(
@@ -536,7 +548,9 @@ def bezier_sigmoid(length, slope, curve_point, precision=10000):
     return bezier_points
 
 
-def smooth_falloff(time_value: int | float, k: int | float) -> float:
+def smooth_falloff(
+    time_value: int | float, k: int | float
+) -> float:
     return 1 - (1 / (1 + k * time_value))
 
 
@@ -557,7 +571,9 @@ def convolve_2d(matrix, kernel):
         start_row = (pad_to_size - rows) // 2
         start_column = (pad_to_size - column) // 2
 
-        padded_array = [[0] * pad_to_size for _ in range(pad_to_size)]
+        padded_array = [
+            [0] * pad_to_size for _ in range(pad_to_size)
+        ]
 
         for i in range(rows):
             for j in range(column):
@@ -679,7 +695,9 @@ def convolve_2d(matrix, kernel):
 
         return shifted_array
 
-    pad_to_size = nearest_power_of_two(max(len(matrix), len(kernel)))
+    pad_to_size = nearest_power_of_two(
+        max(len(matrix), len(kernel))
+    )
     padded_matrix = pad(matrix, pad_to_size)
     padded_kernel = fft_shift(pad(kernel, pad_to_size))
 
@@ -836,7 +854,9 @@ def simulate_random_walk(
                     previous_x = path[-1][0]
                     previous_y = path[-1][1]
 
-                    pixel: Pixel = image.grid[previous_x][previous_y]
+                    pixel: Pixel = image.grid[previous_x][
+                        previous_y
+                    ]
                     pixel.struck = image.grid[x][y]
                     pixel.frozen = True
                     pixel.weight = 100
@@ -890,14 +910,17 @@ def crisp_upscale(image: Image, new_size_target: int) -> Image:
         pixel.weight = 1000
 
         if parent is not None:
-            struck_x, struck_y = image.get_pixel_coordinates_from_id(
-                parent
+            struck_x, struck_y = (
+                image.get_pixel_coordinates_from_id(parent)
             )
             scaled_struck_x = int(struck_x * scale_factor)
             scaled_struck_y = int(struck_y * scale_factor)
 
             line_points = bresenham_line(
-                scaled_x, scaled_y, scaled_struck_x, scaled_struck_y
+                scaled_x,
+                scaled_y,
+                scaled_struck_x,
+                scaled_struck_y,
             )[1:-1]
             if len(line_points) > 0:
                 for i, line_point in enumerate(line_points):
@@ -940,7 +963,9 @@ def jitter_lines(image: Image, jitter: int) -> Image:
         start_x, start_y = segment_info['starts_at']
         end_x, end_y = segment_info['ends_at']
 
-        line_points = bresenham_line(start_x, start_y, end_x, end_y)
+        line_points = bresenham_line(
+            start_x, start_y, end_x, end_y
+        )
 
         jittered_points = [
             (
@@ -982,13 +1007,16 @@ def jitter_lines(image: Image, jitter: int) -> Image:
             )
             total_steps = len(jitter_line_points) - 1
 
-            for j, jitter_line_point in enumerate(jitter_line_points):
+            for j, jitter_line_point in enumerate(
+                jitter_line_points
+            ):
                 if total_steps > 0:
                     interpolation_factor = j / total_steps
                 else:
                     interpolation_factor = 0
                 new_weight = (
-                    (1 - interpolation_factor) * jitter_start_weight
+                    (1 - interpolation_factor)
+                    * jitter_start_weight
                     + interpolation_factor * jitter_end_weight
                 )
                 new_image[*jitter_line_point].weight = new_weight
@@ -1006,7 +1034,9 @@ def calculate_heights(
     assert image.origin is not None
 
     new_image = Image(Border(image.border.border_points))
-    new_image.origin = new_image.grid[image.origin.x][image.origin.y]
+    new_image.origin = new_image.grid[image.origin.x][
+        image.origin.y
+    ]
 
     inbound_adjacency_list, _ = image.graph()
 
@@ -1059,7 +1089,8 @@ def calculate_heights(
                 bfs_queue.append(node)
 
     maximum_downstream_count = max(
-        downstream_count for _, downstream_count in downstream_counts
+        downstream_count
+        for _, downstream_count in downstream_counts
     )
     for subject, downstream_count in downstream_counts:
         x, y = new_image.get_pixel_coordinates_from_id(subject)
@@ -1069,10 +1100,16 @@ def calculate_heights(
                 raise ValueError(
                     "Must set value for 'smooth_detail_falloff'"
                 )
-            new_image[x, y].weight = maximum_height * smooth_falloff(
-                downstream_count,
-                1
-                / (maximum_downstream_count / smooth_detail_falloff),
+            new_image[x, y].weight = (
+                maximum_height
+                * smooth_falloff(
+                    downstream_count,
+                    1
+                    / (
+                        maximum_downstream_count
+                        / smooth_detail_falloff
+                    ),
+                )
             )
         elif falloff_mode == 'exponential':
             if not exponential_detail_falloff:
@@ -1153,7 +1190,10 @@ def bicubic_upscale(image: Image, new_size_target: int) -> Image:
             return 1 - 2 * absolute_x**2 + absolute_x**3
         elif 1 < absolute_x < 2:
             return (
-                4 - 8 * absolute_x + 5 * absolute_x**2 - absolute_x**3
+                4
+                - 8 * absolute_x
+                + 5 * absolute_x**2
+                - absolute_x**3
             )
         else:
             return 0
@@ -1167,8 +1207,12 @@ def bicubic_upscale(image: Image, new_size_target: int) -> Image:
         result = 0
         for m in range(-1, 3):
             for n in range(-1, 3):
-                x_index = int(clamp(x_floor + m, 0, image.size - 1))
-                y_index = int(clamp(y_floor + n, 0, image.size - 1))
+                x_index = int(
+                    clamp(x_floor + m, 0, image.size - 1)
+                )
+                y_index = int(
+                    clamp(y_floor + n, 0, image.size - 1)
+                )
                 weight = image.grid[x_index][y_index].weight
                 result += (
                     weight
@@ -1205,8 +1249,9 @@ def gaussian_blur(
             for j in range(size):
                 x = i - center
                 y = j - center
-                gaussian_filter[i][j] = constant_term * math.e ** -(
-                    (x**2 + y**2) / (2 * sigma**2)
+                gaussian_filter[i][j] = (
+                    constant_term
+                    * math.e ** -((x**2 + y**2) / (2 * sigma**2))
                 )
                 total += gaussian_filter[i][j]
 
@@ -1234,7 +1279,9 @@ def gaussian_blur(
     return new_image
 
 
-def iterative_pseudo_erosion(image: Image, iterations: int) -> Image:
+def iterative_pseudo_erosion(
+    image: Image, iterations: int
+) -> Image:
     new_image = Image(Border(image.border.border_points))
     return image
 
@@ -1274,7 +1321,9 @@ def create_dla_noise(
     print(f'Steps: {steps}')
 
     curve = bezier_sigmoid(
-        steps, density_falloff_extremity, density_falloff_bias * steps
+        steps,
+        density_falloff_extremity,
+        density_falloff_bias * steps,
     )
 
     central_pixel = image.grid[image.size // 2][image.size // 2]
@@ -1296,7 +1345,9 @@ def create_dla_noise(
             print(f'Step: {step + 1}')
             print(f'Image Size: {image.size}x{image.size}')
             print(f'Image Density: {image.density}')
-            print(f'Step Density Threshold: {step_density_threshold}')
+            print(
+                f'Step Density Threshold: {step_density_threshold}'
+            )
 
         while image.density < step_density_threshold:
             num_concurrent_walkers: int
@@ -1314,7 +1365,9 @@ def create_dla_noise(
                 num_concurrent_walkers = 1
 
             if DEBUG:
-                print(f'Step: {step + 1} :: Simulating Random Walk')
+                print(
+                    f'Step: {step + 1} :: Simulating Random Walk'
+                )
             simulate_random_walk(
                 image,
                 num_concurrent_walkers,
@@ -1424,7 +1477,9 @@ def main():
     )
 
     end_time = time.time()
-    print(f'Image generation time: {end_time - start_time} seconds')
+    print(
+        f'Image generation time: {end_time - start_time} seconds'
+    )
 
     if DEBUG:
         for image in images:
